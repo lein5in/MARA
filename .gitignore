@@ -1,0 +1,28 @@
+# Environnement virtuel
+venv/
+env/
+.env
+
+# Clés API et secrets
+.env
+config.py
+secrets.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# VS Code
+.vscode/
+
+# Mémoire MARA (données personnelles)
+memory/
+*.json
+
+# Audio temporaire
+*.wav
+*.mp3

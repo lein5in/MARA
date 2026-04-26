@@ -1,0 +1,33 @@
+# Wake word
+openwakeword
+
+# Speech-to-Text
+openai-whisper
+
+# Audio
+pyaudio
+sounddevice
+numpy
+
+# Cerveau IA
+anthropic
+
+# Contrôle système
+pyautogui
+pycaw
+psutil
+
+# Navigateur
+selenium
+
+# Interface visuelle
+pyqt5
+
+# Clavier (touche trigger)
+keyboard
+
+# Mémoire chiffrée
+cryptography
+
+# Variables d'environnement
+python-dotenv
