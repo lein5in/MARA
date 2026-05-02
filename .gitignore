@@ -20,9 +20,13 @@ build/
 .vscode/
 
 # Mémoire MARA (données personnelles)
-memory/
+memory/mara.key
+memory/mara_memory.enc
 *.json
 
 # Audio temporaire
 *.wav
 *.mp3
+
+# Credentials MARA
+memory/mara_credentials.enc

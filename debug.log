@@ -1,0 +1,4 @@
+[2026-04-27/ 16:50:15.785:INFO:browser_app_win.cc(328)] filePath to delete: NVIDIA App\UpdateFramework\status\nvapp\nvAppUpdate.json
+[2026-04-27/ 16:50:15.803:INFO:cefmain_win.cc(409)] Invoking CefInitialize
+[2026-04-30/ 17:21:46.666:INFO:browser_app_win.cc(328)] filePath to delete: NVIDIA App\UpdateFramework\status\nvapp\nvAppUpdate.json
+[2026-04-30/ 17:21:46.682:INFO:cefmain_win.cc(409)] Invoking CefInitialize
