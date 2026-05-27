@@ -31,19 +31,28 @@ def _default_memory() -> dict:
     return {
         "user": {
             "name":        os.getenv("USER_NAME", ""),
-            "facts":       [],   # ["préfère le café noir", "étudiant en génie", ...]
-            "preferences": [],   # ["répond court", "langue FR le soir", ...]
+            "facts":       [],
+            "preferences": [],
         },
-        "context":      [],      # infos temporaires / projets en cours
-        "paused_until": None,    # ISO timestamp — MARA en pause jusqu'à cette date
+        "context":      [],
+        "paused_until": None,
         "last_updated": None
     }
 
-# ─── Classe Memory ────────────────────────────────────────────────────────────
+# ─── Classe Memory — Singleton ────────────────────────────────────────────────
+# Un seul objet Memory existe pour toute la durée du process.
+# executor.py, brain.py, main.py — tous obtiennent la même instance.
+# Fini la désynchronisation entre le cache RAM de deux instances séparées.
+
+_instance = None
 
 class Memory:
-    def __init__(self):
-        self._data = self._load()
+    def __new__(cls):
+        global _instance
+        if _instance is None:
+            _instance = super().__new__(cls)
+            _instance._data = _instance._load()
+        return _instance
 
     # ── I/O chiffré ──────────────────────────────────────────────────────────
 
@@ -54,7 +63,6 @@ class Memory:
             with open(MEMORY_FILE, "rb") as f:
                 decrypted = _fernet.decrypt(f.read())
             data = json.loads(decrypted.decode("utf-8"))
-            # Migration : anciens fichiers sans paused_until
             if "paused_until" not in data:
                 data["paused_until"] = None
             return data
@@ -72,28 +80,24 @@ class Memory:
     # ── Mémoire utilisateur ───────────────────────────────────────────────────
 
     def add_fact(self, fact: str):
-        """Ajoute un fait sur l'utilisateur (ex: 'a un exam lundi')."""
         fact = fact.strip()
         if fact and fact not in self._data["user"]["facts"]:
             self._data["user"]["facts"].append(fact)
             self._save()
 
     def add_preference(self, preference: str):
-        """Ajoute une préférence (ex: 'préfère les réponses courtes')."""
         preference = preference.strip()
         if preference and preference not in self._data["user"]["preferences"]:
             self._data["user"]["preferences"].append(preference)
             self._save()
 
     def add_context(self, info: str):
-        """Ajoute une info de contexte temporaire (projet en cours, etc.)."""
         info = info.strip()
         if info and info not in self._data["context"]:
             self._data["context"].append(info)
             self._save()
 
     def remove_last_fact(self):
-        """Supprime le dernier fait ajouté."""
         if self._data["user"]["facts"]:
             removed = self._data["user"]["facts"].pop()
             self._save()
@@ -101,8 +105,8 @@ class Memory:
         return None
 
     def clear(self):
-        """Efface toute la mémoire utilisateur et repart de zéro (conserve paused_until)."""
-        pause = self._data.get("paused_until")  # on ne réinitialise pas la pause
+        """Efface toute la mémoire utilisateur (conserve paused_until)."""
+        pause = self._data.get("paused_until")
         self._data = _default_memory()
         self._data["paused_until"] = pause
         self._save()
@@ -111,20 +115,14 @@ class Memory:
     # ── Auto-contrôle ─────────────────────────────────────────────────────────
 
     def set_pause(self, until_iso: str):
-        """
-        Met MARA en pause jusqu'au timestamp ISO fourni.
-        Ex: until_iso = "2025-12-01T09:00:00"
-        """
         self._data["paused_until"] = until_iso
         self._save()
         print(f"[System] MARA en pause jusqu'à : {until_iso}")
 
     def get_pause(self) -> str | None:
-        """Retourne le timestamp ISO de fin de pause, ou None si pas en pause."""
         return self._data.get("paused_until")
 
     def clear_pause(self):
-        """Annule la pause — réveil immédiat."""
         self._data["paused_until"] = None
         self._save()
         print("[System] Pause annulée.")
@@ -132,7 +130,6 @@ class Memory:
     # ── Prompt & affichage ────────────────────────────────────────────────────
 
     def get_summary(self) -> str:
-        """Retourne un résumé lisible pour l'affichage vocal."""
         facts = self._data["user"]["facts"]
         prefs = self._data["user"]["preferences"]
         ctx   = self._data["context"]
@@ -148,10 +145,6 @@ class Memory:
         return ". ".join(parts) if parts else "Je n'ai encore rien mémorisé sur toi."
 
     def get_context_for_prompt(self) -> str:
-        """
-        Retourne un bloc de contexte à injecter dans le system prompt de Claude.
-        Retourne une chaîne vide si la mémoire est vide.
-        """
         facts = self._data["user"]["facts"]
         prefs = self._data["user"]["preferences"]
         ctx   = self._data["context"]
@@ -170,5 +163,4 @@ class Memory:
         return "\n".join(lines)
 
     def debug(self):
-        """Affiche la mémoire en clair dans le terminal (debug uniquement)."""
         print(json.dumps(self._data, ensure_ascii=False, indent=2))

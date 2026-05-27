@@ -32,6 +32,10 @@ PROTOCOL_APPS = {
     "maps":                 "bingmaps:",
     "clock":                "ms-clock:",
     "alarms":               "ms-clock:",
+    "cmd":              "cmd.exe",
+    "command prompt":   "cmd.exe",
+    "terminal":         "cmd.exe",
+    "powershell":       "powershell.exe",
 }
 
 SENSITIVE_ACTIONS = {"delete", "shutdown", "restart", "format", "browser_delete_credentials"}
@@ -91,6 +95,12 @@ def execute(actions: list) -> list[str]:
                 result = system.set_pause(action.get("duration", ""), _memory)
             elif action_type == "cancel_pause":
                 result = system.cancel_pause(_memory)
+            
+            elif action_type == "silent_on":
+                result = system.enable_silent()
+            elif action_type == "silent_off":
+                result = system.disable_silent()
+
             # ── Browser ───────────────────────────────────────────────────────
             elif action_type == "browser_navigate":
                 result = _browser_navigate(action)
@@ -158,6 +168,7 @@ def _run(action: dict) -> str:
             stderr=subprocess.DEVNULL
         )
         return f"Lancé : {Path(found_path).name}"
+    
 
     # 2. Protocoles Windows (ms-windows-store:, etc.)
     if ":" in app_name and "/" not in app_name and "\\" not in app_name:

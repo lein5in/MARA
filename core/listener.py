@@ -20,14 +20,36 @@ CHUNK_SIZE  = 512
 # ─── Lock Whisper — GPU ne peut pas transcrire en parallèle ───────────────────
 _whisper_lock = threading.Lock()
 
+# ─── Flag is_speaking — True quand MARA joue de l'audio via TTS ──────────────
+# Evite que l'emergency listener capte la voix de MARA dans ses propres micros
+_is_speaking       = False
+_speaking_lock     = threading.Lock()
+
+def set_speaking(val: bool):
+    """
+    Appelé par voice.py avant/après chaque playback TTS.
+    Thread-safe — utilisé par l'emergency loop pour ignorer
+    les détections pendant que MARA parle.
+    """
+    global _is_speaking
+    with _speaking_lock:
+        _is_speaking = val
+
+
+def _get_is_speaking() -> bool:
+    with _speaking_lock:
+        return _is_speaking
+
+
 # ─── Paramètres réveil d'urgence ──────────────────────────────────────────────
-_ENERGY_THRESHOLD  = 600    # RMS minimum — plus élevé pour éviter les faux positifs
-_BUFFER_SECONDS    = 1.5    # durée du buffer à transcrire quand voix détectée
-_DETECTION_WINDOW  = 8      # secondes pour compter 3x "MARA"
-_REQUIRED_COUNT    = 3      # nombre de "MARA" requis pour le réveil
-_COOLDOWN_SECONDS  = 2      # pause entre deux transcriptions d'urgence
-_POST_WAKE_COOLDOWN = 8.0   # secondes d'immunité après un réveil d'urgence
-_POST_PAUSE_GRACE  = 4.0    # secondes d'immunité après la mise en pause (évite le tail audio)
+_ENERGY_THRESHOLD   = 600    # RMS minimum — plus élevé pour éviter les faux positifs
+_BUFFER_SECONDS     = 1.5    # durée du buffer à transcrire quand voix détectée
+_DETECTION_WINDOW   = 8      # secondes pour compter 3x "MARA"
+_REQUIRED_COUNT     = 3      # nombre de "MARA" requis pour le réveil
+_COOLDOWN_SECONDS   = 2      # pause entre deux transcriptions d'urgence
+_POST_WAKE_COOLDOWN = 8.0    # secondes d'immunité après un réveil d'urgence
+_POST_PAUSE_GRACE   = 8.0    # ↑ était 4.0 — monté à 8s : couvre le tail audio
+                              # et le délai de réponse TTS post-pause
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -102,7 +124,6 @@ def _transcribe_buffer(audio: np.ndarray) -> str:
             temp_path = f.name
             wav.write(temp_path, SAMPLE_RATE, audio)
 
-        # Essaie d'acquérir le lock sans bloquer indéfiniment
         acquired = _whisper_lock.acquire(timeout=2.0)
         if not acquired:
             return ""
@@ -134,12 +155,15 @@ def _emergency_loop(on_wake, stop_event: threading.Event):
     """
     Boucle principale du thread d'urgence.
     Écoute en continu, détecte "MARA" x3 dans la fenêtre de temps.
+
+    Skip toute détection quand :
+      - on est dans la période d'immunité (post-pause ou post-wake)
+      - _is_speaking est True (MARA est en train de parler — évite le tail audio TTS)
     """
     buffer_size   = int(SAMPLE_RATE * _BUFFER_SECONDS)
     rolling_audio = deque(maxlen=buffer_size)
     detections    = deque()
     last_check    = 0.0
-    # Grâce période au démarrage — laisse le temps à l'audio de se stabiliser
     immune_until  = time.time() + _POST_PAUSE_GRACE
 
     print("[Emergency] Thread de réveil d'urgence démarré.")
@@ -159,11 +183,16 @@ def _emergency_loop(on_wake, stop_event: threading.Event):
 
                 now = time.time()
 
-                # Période d'immunité — ignore tout (post-pause ou post-wake)
+                # ── Période d'immunité post-pause / post-wake ─────────────────
                 if now < immune_until:
                     continue
 
-                # Cooldown entre transcriptions
+                # ── MARA est en train de parler — ignore pour éviter le tail TTS
+                if _get_is_speaking():
+                    detections.clear()  # reset aussi les détections partielles
+                    continue
+
+                # ── Cooldown entre transcriptions ─────────────────────────────
                 if now - last_check < _COOLDOWN_SECONDS:
                     continue
 
@@ -199,7 +228,7 @@ def _emergency_loop(on_wake, stop_event: threading.Event):
                     detections.clear()
                     rolling_audio.clear()
                     last_check   = now
-                    immune_until = now + _POST_WAKE_COOLDOWN  # immunité post-wake
+                    immune_until = now + _POST_WAKE_COOLDOWN
                     try:
                         on_wake()
                     except Exception as e:
@@ -222,11 +251,6 @@ def start_emergency_listener(on_wake) -> threading.Event:
 
     Returns:
         stop_event: threading.Event — appelle stop_event.set() pour arrêter le thread.
-
-    Usage dans main.py :
-        from core.listener import start_emergency_listener
-        stop_event = start_emergency_listener(on_emergency_wake)
-        # Pour arrêter : stop_event.set()
     """
     stop_event = threading.Event()
     thread = threading.Thread(
