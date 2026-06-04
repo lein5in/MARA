@@ -4,6 +4,7 @@ from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import Qt
 
 from core.ui import MARAWindow, MARAWorker
+from core.orb import MARAOrb
 from core.app_registry import get_registry
 
 def main():
@@ -17,10 +18,18 @@ def main():
 
     text_queue = queue.Queue()
 
+    # ── Interface texte ───────────────────────────────────────────────────────
     window = MARAWindow(text_queue)
-    window.hide()  # Interface cachée au démarrage — "show interface" pour l'ouvrir
+    window.hide()
 
+    # ── Orbe neural ───────────────────────────────────────────────────────────
+    orb = MARAOrb()
+    # Pas de show() — l'orbe est invisible jusqu'au premier état actif
+
+    # ── Worker ────────────────────────────────────────────────────────────────
     worker = MARAWorker(text_queue)
+
+    # Signaux → interface texte
     worker.sig_status.connect(window.on_status)
     worker.sig_stream_start.connect(window.on_mara_stream_start)
     worker.sig_chunk.connect(window.on_mara_chunk)
@@ -28,7 +37,11 @@ def main():
     worker.sig_user_msg.connect(window.on_user_message)
     worker.sig_password_mode.connect(window.on_password_mode)
     worker.sig_show.connect(window.show)
-    worker.sig_hide.connect(window.hide)  # ui_hide intent
+    worker.sig_hide.connect(window.hide)
+
+    # Signaux → orbe
+    worker.sig_status.connect(orb.set_state)
+
     worker.start()
 
     def on_quit():

@@ -14,6 +14,8 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont
 
+from core.brain import _build_system_prompt
+
 # ─── Palette ──────────────────────────────────────────────────────────────────
 BG         = "#0c0c10"
 ACCENT     = "#4ecca3"
@@ -682,6 +684,12 @@ class MARAWorker(QThread):
                 self.sig_status.emit("OPERATIONAL")
                 continue
 
+            if first.startswith("__VISION__"):
+                prompt = first.replace("__VISION__", "").strip()
+                self._handle_vision(prompt, system, speak_stream, ask_mara_stream)
+                self.sig_status.emit("IDLE")
+                continue
+
             # ── Streaming temps réel ──────────────────────────────────────────
             self.sig_stream_start.emit()
             full_response = first
@@ -786,28 +794,35 @@ class MARAWorker(QThread):
                     speak_stream(iter([result]))
 
     def _handle_vision(self, prompt, system, speak_stream, ask_mara_stream):
-        try:
-            import base64, os
+        try : 
+            import base64, os, re as _re, json as _json
             from core import system as sys_mod
-            from anthropic import Anthropic
+            from anthropic import Anthropic 
             from dotenv import load_dotenv
             load_dotenv()
 
-            result = sys_mod.take_screenshot()
-            if not result or result.startswith("Erreur"):
-                msg = "Je n'arrive pas à prendre le screenshot."
+            result = sys_mod.take_screenshot_for_vision()
+
+            if not result :
+                msg = "I can not take a screenshot right now."
                 self.sig_done.emit(msg, [])
                 print(f"MARA : {msg}")
-                return
-
+                return 
+            
             self.sig_status.emit("THINKING")
-            with open(result, "rb") as f:
+
+            with open(result, "rb" ) as f :
                 img_b64 = base64.standard_b64encode(f.read()).decode("utf-8")
 
             client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+
+            from core.brain import _build_system_prompt 
+            system_prompt =  _build_system_prompt()
+
             response = client.messages.create(
-                model="claude-sonnet-4-6",
-                max_tokens=500,
+                model = "claude-sonnet-4-6",
+                max_tokens = 500,
+                system = system_prompt,
                 messages=[{
                     "role": "user",
                     "content": [
@@ -819,18 +834,43 @@ class MARAWorker(QThread):
                 }]
             )
             answer = response.content[0].text
-            self.sig_stream_start.emit()
-            self.sig_chunk.emit(answer)
-            self.sig_done.emit(answer, [])
-            print(f"MARA (vision) : {answer}")
-            self.sig_status.emit("SPEAKING")
-            speak_stream(iter([answer]))
-            self.sig_status.emit("OPERATIONAL")
 
-        except Exception as e:
-            msg = f"Vision error: {e}"
+            vocal = answer
+            actions = []
+            try : 
+                m = _re.search(r'\{.*"actions"\s*:.*\}', answer, _re.DOTALL)
+                if m : 
+                    parsed = _json.loads(m.group())
+                    if isinstance(parsed, dict) and "actions" in parsed : 
+                        vocal = parsed.get("response", answer)
+                        actions = parsed.get("actions", [])
+            except (_json.JSONDecodeError, AttributeError):
+                pass
+
+
+            chips  = [a.get("type", "") for a in actions]
+            self.sig_stream_start.emit()
+            self.sig_chunk.emit(vocal)
+            self.sig_done.emit(vocal, chips)
+            print(f"MARA (vision) : {vocal}")
+
+            self.sig_status.emit("SPEAKING")
+            speak_stream(iter([vocal]))
+
+            if actions : 
+                from core.executor import execute 
+                execute(actions)
+
+            
+            self.sig_status.emit("IDLE")
+
+        except Exception as e :
+            msg = f"Vision error : {e}"
             self.sig_done.emit(msg, [])
+            self.sig_status.emit("IDLE")
             print(f"MARA : {msg}")
 
+
+ 
     def stop(self):
         self._running = False

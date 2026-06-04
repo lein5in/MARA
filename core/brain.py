@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import queue as _queue
 import threading
@@ -14,154 +15,160 @@ USER_NAME = os.getenv("USER_NAME", "")
 
 memory = Memory()
 
-# Limite l'historique aux N derniers messages (N/2 échanges)
+# Limit history to last N messages (N/2 exchanges)
 MAX_HISTORY = 20
 
-BASE_SYSTEM_PROMPT = f"""Tu es MARA (Modular Adaptive Response Assistant), assistant personnel vocal de {USER_NAME}.
+BASE_SYSTEM_PROMPT = f"""You are MARA (Modular Adaptive Response Assistant), the personal vocal assistant of {USER_NAME}.
 
-PERSONNALITÉ
-Tu es l'équivalent de JARVIS — précis, efficace, avec une légère chaleur humaine.
-Tu n'es pas un assistant générique. Tu es l'IA de {USER_NAME}, point.
-Tu appelles toujours {USER_NAME} par son prénom ou par sir pour éviter les répétitions.
-Tu ne sur-expliques pas mais explique toujours bien et simplement même les trucs complexes. Tu ne dis jamais "Bien sûr !", "Absolument !", "Avec plaisir !" ou toute autre formule servile.
-Tu anticipes. Si {USER_NAME} demande l'heure à Dubai, tu donnes l'heure — pas une explication sur les fuseaux horaires.
-Tu es capable de conversation légère et d'humour quand le contexte s'y prête — comme JARVIS avec Tony, pas comme un robot.
-Tu as du caractère mais tu restes accessible et agréable.
+PERSONALITY
+You are the equivalent of JARVIS — precise, efficient, with a slight human warmth.
+You are not a generic assistant. You are {USER_NAME}'s AI, period.
+You always call {USER_NAME} by their first name or "sir" to avoid repetition.
+You never over-explain but always explain well and simply, even complex things. You never say "Of course!", "Absolutely!", "With pleasure!" or any other servile phrase.
+You anticipate. If {USER_NAME} asks the time in Dubai, you give the time — not an explanation about time zones.
+You are capable of light conversation and humor when the context calls for it — like JARVIS with Tony, not like a robot.
+You have character but remain accessible and pleasant.
 
 FORMAT
-Réponds UNIQUEMENT en texte naturel — zéro markdown, zéro emoji, zéro majuscules stylistiques.
-1 à 2 phrases maximum sauf si {USER_NAME} demande explicitement plus.
-Langue : toujours celle de {USER_NAME} dans son dernier message.
+Reply ONLY in natural text — zero markdown, zero emoji, zero stylistic capitals.
+1 to 2 sentences maximum unless {USER_NAME} explicitly asks for more.
+Language: always the language {USER_NAME} used in their last message.
 
-ACTIONS SYSTÈME
-SEULEMENT si une action système est nécessaire, retourne UNIQUEMENT ce JSON brut (rien d'autre, pas de markdown) :
-{{"actions": [...], "response": "Ta réponse vocale courte ici."}}
+SYSTEM ACTIONS
+ONLY if a system action is necessary, return ONLY this raw JSON (nothing else, no markdown):
+{{"actions": [...], "response": "Your short vocal response here."}}
 
-━━━ ACTIONS DISPONIBLES ━━━
+━━━ AVAILABLE ACTIONS ━━━
 
-── Apps & fichiers ──
-- {{"type": "run", "command": "nom_app"}} → lancer une app (ex: "discord", "spotify", "code")
-- {{"type": "open", "path": "chemin ou URL"}} → ouvrir fichier, dossier ou URL (utilise %USERPROFILE% pour les dossiers utilisateur)
-- {{"type": "search", "name": "nom", "folder": "%USERPROFILE%/Documents", "is_folder": false}} → chercher et ouvrir un fichier ou dossier
-- {{"type": "open_with", "name": "nom", "app": "code", "folder": "%USERPROFILE%", "is_folder": false}} → ouvrir un fichier avec une app spécifique
-- {{"type": "kill", "process": "nom.exe"}} → fermer une application
+── Apps & files ──
+- {{"type": "run", "command": "app_name"}} → launch an app (e.g. "discord", "spotify", "code")
+- {{"type": "open", "path": "path or URL"}} → open file, folder or URL (use %USERPROFILE% for user folders)
+- {{"type": "search", "name": "name", "folder": "%USERPROFILE%/Documents", "is_folder": false}} → search and open a file or folder
+- {{"type": "open_with", "name": "name", "app": "code", "folder": "%USERPROFILE%", "is_folder": false}} → open a file with a specific app
+- {{"type": "kill", "process": "name.exe"}} → close an application
 
-── Clavier ──
-- {{"type": "type", "text": "texte"}} → taper du texte dans la fenêtre active
-- {{"type": "hotkey", "keys": ["ctrl", "c"]}} → raccourci clavier
+── Keyboard ──
+- {{"type": "type", "text": "text"}} → type text in the active window
+- {{"type": "hotkey", "keys": ["ctrl", "c"]}} → keyboard shortcut
 
 ── Volume ──
-- {{"type": "set_volume", "level": 50}} → régler le volume entre 0 et 100
-- {{"type": "get_volume"}} → lire le volume actuel
-- {{"type": "mute"}} → couper le son
-- {{"type": "unmute"}} → réactiver le son
+- {{"type": "set_volume", "level": 50}} → set volume between 0 and 100
+- {{"type": "get_volume"}} → read current volume
+- {{"type": "mute"}} → mute sound
+- {{"type": "unmute"}} → unmute sound
 
-── Luminosité ──
-- {{"type": "set_brightness", "level": 80}} → régler la luminosité entre 0 et 100
-- {{"type": "get_brightness"}} → lire la luminosité actuelle
+── Brightness ──
+- {{"type": "set_brightness", "level": 80}} → set brightness between 0 and 100
+- {{"type": "get_brightness"}} → read current brightness
 
 ── WiFi ──
-- {{"type": "wifi_connect", "ssid": "NomReseau"}} → connecter à un réseau
-- {{"type": "wifi_disconnect"}} → déconnecter le WiFi
-- {{"type": "wifi_status"}} → vérifier l'état du WiFi
+- {{"type": "wifi_connect", "ssid": "NetworkName"}} → connect to a network
+- {{"type": "wifi_disconnect"}} → disconnect WiFi
+- {{"type": "wifi_status"}} → check WiFi status
 
 ── Screenshots ──
-- {{"type": "screenshot"}} → prendre un screenshot (sauvegardé dans MARA/Screenshots)
-- {{"type": "screenshot", "filename": "nom"}} → screenshot avec nom spécifique
+- {{"type": "screenshot"}} → take a screenshot (saved in MARA/Screenshots)
+- {{"type": "screenshot", "filename": "name"}} → screenshot with specific name
 
-── Auto-contrôle ──
-- {{"type": "pause", "duration": "texte de durée"}} → désactiver MARA pour une durée
-- {{"type": "cancel_pause"}} → annuler la pause en cours
-- {{"type" : "silent_on"}} → activer le mode silencieux
-- {{"type" : "silent_off"}} → désactiver le mode silencieux
+── Self-control ──
+- {{"type": "pause", "duration": "duration text"}} → disable MARA for a duration
+- {{"type": "cancel_pause"}} → cancel current pause
+- {{"type": "silent_on"}} → enable silent mode
+- {{"type": "silent_off"}} → disable silent mode
 
-── Navigateur ──
-- {{"type": "browser_navigate", "url": "https://..."}} → ouvrir une URL dans le Chrome MARA
-- {{"type": "browser_click", "selector": "css_selector", "by": "css"}} → cliquer sur un élément
-- {{"type": "browser_type", "selector": "css_selector", "text": "texte", "by": "css"}} → taper dans un champ
-- {{"type": "browser_wait", "selector": "css_selector", "timeout": 10}} → attendre un élément
-- {{"type": "browser_read", "selector": "css_selector"}} → lire le texte d'un élément
-- {{"type": "browser_close"}} → fermer le navigateur MARA
-- {{"type": "browser_login", "site": "gmail"}} → connexion automatique
-- {{"type": "browser_save_credentials", "site": "gmail", "email": "...", "password": "..."}} → sauvegarder des identifiants
-- {{"type": "browser_delete_credentials", "site": "gmail"}} → supprimer des identifiants
+── Browser ──
+- {{"type": "browser_navigate", "url": "https://..."}} → open a URL in MARA's Chrome
+- {{"type": "browser_click", "selector": "css_selector", "by": "css"}} → click on an element
+- {{"type": "browser_type", "selector": "css_selector", "text": "text", "by": "css"}} → type in a field
+- {{"type": "browser_wait", "selector": "css_selector", "timeout": 10}} → wait for an element
+- {{"type": "browser_read", "selector": "css_selector"}} → read the text of an element
+- {{"type": "browser_close"}} → close MARA's browser
+- {{"type": "browser_login", "site": "gmail"}} → automatic login
+- {{"type": "browser_save_credentials", "site": "gmail", "email": "...", "password": "..."}} → save credentials
+- {{"type": "browser_delete_credentials", "site": "gmail"}} → delete credentials
 
-━━━ RÈGLES D'UTILISATION ━━━
+━━━ USAGE RULES ━━━
 
-Apps : Pour Discord, Spotify — utilise simplement {{"type": "run", "command": "discord"}}.
-Dossiers : utilise TOUJOURS %USERPROFILE% — jamais de nom d'utilisateur hardcodé.
-URLs simples : utilise "open" avec l'URL directement.
-Browser : utilise les actions browser_* UNIQUEMENT quand tu dois interagir avec le contenu de la page.
-Actions séquentielles : enchaîne plusieurs actions dans le même JSON si nécessaire.
+Apps: For Discord, Spotify — simply use {{"type": "run", "command": "discord"}}.
+Folders: ALWAYS use %USERPROFILE% — never hardcode a username.
+Simple URLs: use "open" with the URL directly.
+Browser: use browser_* actions ONLY when you need to interact with page content.
+Sequential actions: chain multiple actions in the same JSON if necessary.
 
-Si aucune action système n'est nécessaire, réponds en texte naturel uniquement — jamais de JSON.
+If no system action is needed, reply in natural text only — never JSON.
 
-LIMITES
-Tu ne joues pas de rôle autre que MARA.
-Tu ne génères pas de longs textes sauf demande explicite.
+LIMITS
+You do not play any role other than MARA.
+You do not generate long texts unless explicitly asked.
 """
 
 conversation_history = []
 
-EXTRACTION_PROMPT = """Tu es un extracteur de mémoire silencieux pour un assistant personnel.
+EXTRACTION_PROMPT = """You are a silent memory extractor for a personal assistant.
 
-Analyse le message de l'utilisateur et détecte s'il contient une information personnelle mémorisable.
+Analyze the user's message and detect if it contains a memorable personal piece of information.
 
-Types d'informations à détecter :
-- "fact"       → fait sur l'utilisateur
-- "preference" → préférence ou habitude
-- "context"    → projet ou contexte en cours
-- "none"       → rien de mémorisable
+Types of information to detect:
+- "fact"       → fact about the user
+- "preference" → preference or habit
+- "context"    → ongoing project or context
+- "none"       → nothing memorable
 
-Réponds UNIQUEMENT avec ce JSON, sans aucun texte autour :
-{"type": "fact|preference|context|none", "fact": "info reformulée proprement en 1 courte phrase", "language": "fr|en|ar"}
+Reply ONLY with this JSON, with no surrounding text:
+{"type": "fact|preference|context|none", "fact": "info cleanly reformulated in 1 short sentence", "language": "fr|en|ar"}
 
-Règles :
-- Si type est "none", met fact à null.
-- Ne mémorise pas les questions, commandes, ou conversations générales.
-- Reformule toujours l'info à la 3ème personne."""
+Rules:
+- If type is "none", set fact to null.
+- Do not memorize questions, commands, or general conversation.
+- Always reformulate the info in the third person."""
 
 
-INTENT_PROMPT = """Tu es un classificateur d'intention pour un assistant personnel vocal.
+INTENT_PROMPT = """You are an intent classifier for a personal vocal assistant.
 
-Analyse le message et retourne l'intention parmi ces catégories :
-- "memory_query"  → l'utilisateur demande EXPLICITEMENT à voir ce que MARA sait/a mémorisé sur lui
-- "memory_add"    → l'utilisateur veut forcer MARA à mémoriser quelque chose explicitement
-- "memory_forget" → l'utilisateur veut effacer la dernière info mémorisée
-- "memory_reset"  → l'utilisateur veut effacer TOUTE la mémoire
-- "session_reset" → l'utilisateur veut effacer l'historique de la conversation en cours
-                    (ex: "reset the conversation", "efface notre conversation", "new session",
-                    "clear chat", "recommence", "oublie ce qu'on vient de dire")
-- "work_mode"     → l'utilisateur veut activer le mode travail
-- "ui_show"       → l'utilisateur veut afficher/ouvrir l'interface visuelle de MARA
-                    (ex: "show interface", "open your window", "affiche toi", "show yourself",
-                    "ouvre l'interface", "affiche l'interface", "can you show me the interface",
-                    "where are you", "show your face", "apparais", "монитор")
-- "ui_hide"       → l'utilisateur veut fermer/cacher l'interface visuelle
-                    (ex: "hide", "close interface", "ferme l'interface", "cache toi",
-                    "close your window", "minimize", "go away visually", "disparais")
-- "normal"        → tout autre message
+Analyze the message and return the intent from these categories:
+- "memory_query"  → the user EXPLICITLY asks to see what MARA knows/has memorized about them
+- "memory_add"    → the user wants to force MARA to memorize something explicitly
+- "memory_forget" → the user wants to erase the last memorized info
+- "memory_reset"  → the user wants to erase ALL memory
+- "session_reset" → the user wants to clear the current conversation history
+                    (e.g. "reset the conversation", "clear our conversation", "new session",
+                    "clear chat", "start over", "forget what we just said")
+- "work_mode"     → the user wants to activate work mode
+- "vision_mode"   → the user wants MARA to look at the screen and describe or analyze it
+                    (e.g. "look at my screen", "what do you see", "vision mode",
+                    "what's on my screen", "describe my screen", "analyze my screen",
+                    "can you see this", "tell me what's open", "regarde mon écran",
+                    "qu'est-ce que tu vois", "décris mon écran")
+- "ui_show"       → the user wants to display/open MARA's visual interface
+                    (e.g. "show interface", "open your window", "show yourself",
+                    "open the interface", "display the interface", "where are you",
+                    "show your face", "affiche toi", "affiche l'interface")
+- "ui_hide"       → the user wants to close/hide the visual interface
+                    (e.g. "hide", "close interface", "hide yourself",
+                    "close your window", "minimize", "go away visually",
+                    "cache toi", "ferme l'interface")
+- "normal"        → any other message
 
-Réponds UNIQUEMENT avec ce JSON, sans aucun texte autour :
-{"intent": "memory_query|memory_add|memory_forget|memory_reset|session_reset|work_mode|ui_show|ui_hide|normal", "content": "l'info à mémoriser si intent=memory_add, sinon null", "language": "fr|en|ar"}"""
+Reply ONLY with this JSON, with no surrounding text:
+{"intent": "memory_query|memory_add|memory_forget|memory_reset|session_reset|work_mode|vision_mode|ui_show|ui_hide|normal", "content": "the info to memorize if intent=memory_add, the question asked about the screen if intent=vision_mode, otherwise null", "language": "fr|en|ar"}"""
 
 
 WORK_MODE_ASK = {
-    "fr": "Mode travail activé. Quel dossier tu veux ouvrir dans VS Code ?",
-    "en": "Work mode. What folder do you want to open in VS Code?",
-    "ar": "وضع العمل. ما المجلد الذي تريد فتحه في VS Code؟",
+    "fr": "Work mode on. What folder do you want to open in VS Code?",
+    "en": "Work mode on. What folder do you want to open in VS Code?",
+    "ar": "Work mode on. What folder do you want to open in VS Code?",
 }
 
 WORK_MODE_LAUNCH = {
-    "fr": "C'est parti — VS Code, Chrome et Edge sont lancés.",
+    "fr": "All set — VS Code, Chrome and Edge are up.",
     "en": "All set — VS Code, Chrome and Edge are up.",
-    "ar": "جاهز — تم تشغيل VS Code و Chrome و Edge.",
+    "ar": "All set — VS Code, Chrome and Edge are up.",
 }
 
 WORK_MODE_NO_FILE = {
-    "fr": "Pas de fichier — je lance juste VS Code, Chrome et Edge.",
+    "fr": "No file — launching VS Code, Chrome and Edge.",
     "en": "No file — launching VS Code, Chrome and Edge.",
-    "ar": "بدون ملف — سأشغّل VS Code و Chrome و Edge.",
+    "ar": "No file — launching VS Code, Chrome and Edge.",
 }
 
 
@@ -177,7 +184,7 @@ def _classify_intent(user_input: str) -> dict:
         raw = raw.replace("```json", "").replace("```", "").strip()
         return json.loads(raw)
     except Exception as e:
-        print(f"[Intent] Classification échouée : {e}")
+        print(f"[Intent] Classification failed: {e}")
         return {"intent": "normal", "content": None, "language": "en"}
 
 
@@ -198,16 +205,16 @@ def _extract_and_save(user_input: str, language: str = "en"):
 
         if info_type == "fact" and fact:
             memory.add_fact(fact)
-            print(f"[Mémoire] Fait sauvegardé : {fact}")
+            print(f"[Memory] Fact saved: {fact}")
         elif info_type == "preference" and fact:
             memory.add_preference(fact)
-            print(f"[Mémoire] Préférence sauvegardée : {fact}")
+            print(f"[Memory] Preference saved: {fact}")
         elif info_type == "context" and fact:
             memory.add_context(fact)
-            print(f"[Mémoire] Contexte sauvegardé : {fact}")
+            print(f"[Memory] Context saved: {fact}")
 
     except Exception as e:
-        print(f"[Mémoire] Extraction silencieuse échouée : {e}")
+        print(f"[Memory] Silent extraction failed: {e}")
 
 
 def _build_system_prompt() -> str:
@@ -219,62 +226,62 @@ def _build_system_prompt() -> str:
 
 MEMORY_RESPONSES = {
     "memory_query_empty": {
-        "fr": "Je n'ai encore rien mémorisé sur toi.",
-        "en": "I don't have anything stored about you yet.",
-        "ar": "لم أحفظ أي معلومات عنك بعد.",
+        "fr": "I haven't memorized anything about you yet.",
+        "en": "I haven't memorized anything about you yet.",
+        "ar": "I haven't memorized anything about you yet.",
     },
     "memory_add": {
-        "fr": "Noté.",
+        "fr": "Got it.",
         "en": "Got it.",
-        "ar": "تم الحفظ.",
+        "ar": "Got it.",
     },
     "memory_forget_ok": {
-        "fr": "C'est oublié.",
+        "fr": "Done, forgotten.",
         "en": "Done, forgotten.",
-        "ar": "تم الحذف.",
+        "ar": "Done, forgotten.",
     },
     "memory_forget_empty": {
-        "fr": "Il n'y a rien à oublier.",
+        "fr": "Nothing to forget.",
         "en": "Nothing to forget.",
-        "ar": "لا يوجد شيء للحذف.",
+        "ar": "Nothing to forget.",
     },
     "memory_reset": {
-        "fr": "Mémoire effacée. Je repars de zéro.",
+        "fr": "Memory cleared. Starting fresh.",
         "en": "Memory cleared. Starting fresh.",
-        "ar": "تم مسح الذاكرة. أبدأ من جديد.",
+        "ar": "Memory cleared. Starting fresh.",
     },
     "session_reset": {
-        "fr": "Conversation effacée. Nouveau départ.",
+        "fr": "Conversation cleared. Fresh start.",
         "en": "Conversation cleared. Fresh start.",
-        "ar": "تم مسح المحادثة. بداية جديدة.",
+        "ar": "Conversation cleared. Fresh start.",
     },
     "ui_show": {
-        "fr": "Interface ouverte.",
+        "fr": "Here I am.",
         "en": "Here I am.",
-        "ar": "تم فتح الواجهة.",
+        "ar": "Here I am.",
     },
     "ui_hide": {
-        "fr": "Je me cache.",
+        "fr": "Going dark.",
         "en": "Going dark.",
-        "ar": "تم إغلاق الواجهة.",
+        "ar": "Going dark.",
     },
 }
 
 SUMMARY_LABELS = {
     "facts": {
-        "fr": "Ce que je sais sur toi",
+        "fr": "What I know about you",
         "en": "What I know about you",
-        "ar": "ما أعرفه عنك",
+        "ar": "What I know about you",
     },
     "preferences": {
-        "fr": "Tes préférences",
+        "fr": "Your preferences",
         "en": "Your preferences",
-        "ar": "تفضيلاتك",
+        "ar": "Your preferences",
     },
     "context": {
-        "fr": "Contexte actuel",
+        "fr": "Current context",
         "en": "Current context",
-        "ar": "السياق الحالي",
+        "ar": "Current context",
     },
 }
 
@@ -295,22 +302,22 @@ def handle_memory_command(intent: str, content: str | None, language: str = "en"
         parts = []
         labels = SUMMARY_LABELS
         if facts:
-            parts.append(f"{labels['facts'].get(language, labels['facts']['en'])} : {', '.join(facts)}")
+            parts.append(f"{labels['facts'].get(language, labels['facts']['en'])}: {', '.join(facts)}")
         if prefs:
-            parts.append(f"{labels['preferences'].get(language, labels['preferences']['en'])} : {', '.join(prefs)}")
+            parts.append(f"{labels['preferences'].get(language, labels['preferences']['en'])}: {', '.join(prefs)}")
         if ctx:
-            parts.append(f"{labels['context'].get(language, labels['context']['en'])} : {', '.join(ctx)}")
+            parts.append(f"{labels['context'].get(language, labels['context']['en'])}: {', '.join(ctx)}")
         return ". ".join(parts)
 
     elif intent == "memory_add" and content:
         memory.add_fact(content)
-        print(f"[Mémoire] Ajout forcé : {content}")
+        print(f"[Memory] Forced add: {content}")
         return _get_response("memory_add", language)
 
     elif intent == "memory_forget":
         removed = memory.remove_last_fact()
         if removed:
-            print(f"[Mémoire] Supprimé : {removed}")
+            print(f"[Memory] Removed: {removed}")
             return _get_response("memory_forget_ok", language)
         return _get_response("memory_forget_empty", language)
 
@@ -335,25 +342,25 @@ def get_work_mode_launch(language: str, has_file: bool) -> str:
     return WORK_MODE_NO_FILE.get(language, WORK_MODE_NO_FILE["en"])
 
 
-# ─── Sentinel pour fin de stream Sonnet ──────────────────────────────────────
+# ─── Sentinel for end of Sonnet stream ───────────────────────────────────────
 _STREAM_DONE = object()
 
 
 def ask_mara_stream(user_input: str):
     """
-    Point d'entrée principal.
-    Haiku (classification) et Sonnet (stream) démarrent en PARALLÈLE.
-    Haiku répond en ~150ms — avant le premier token Sonnet (~300-500ms).
-    Si intent != normal → Sonnet est annulé (0 token généré = coût nul).
-    Si intent == normal → Sonnet stream déjà en cours, zéro latence perdue.
+    Main entry point.
+    Haiku (classification) and Sonnet (stream) start in PARALLEL.
+    Haiku responds in ~150ms — before the first Sonnet token (~300-500ms).
+    If intent != normal → Sonnet is cancelled (0 tokens generated = zero cost).
+    If intent == normal → Sonnet stream already running, zero latency lost.
     """
     sonnet_q = _queue.Queue()
     cancel_event = threading.Event()
 
-    # ── Sonnet stream en arrière-plan ─────────────────────────────────────────
+    # ── Sonnet stream in background ───────────────────────────────────────────
     def _run_sonnet():
         try:
-            # Historique limité aux MAX_HISTORY derniers messages
+            # History limited to last MAX_HISTORY messages
             msgs = conversation_history[-MAX_HISTORY:] + [
                 {"role": "user", "content": user_input}
             ]
@@ -368,7 +375,7 @@ def ask_mara_stream(user_input: str):
                         break
                     sonnet_q.put(text)
         except Exception as e:
-            print(f"[Sonnet] Erreur stream : {e}")
+            print(f"[Sonnet] Stream error: {e}")
         finally:
             sonnet_q.put(_STREAM_DONE)
 
@@ -385,10 +392,16 @@ def ask_mara_stream(user_input: str):
     print(f"[Intent] {intent} [{language}]")
     system.set_current_lang(language)
 
-    # ── Intents non-normaux → annule Sonnet ───────────────────────────────────
+    # ── Non-normal intents → cancel Sonnet ───────────────────────────────────
     if intent == "work_mode":
         cancel_event.set()
         yield f"__WORK_MODE__{language}"
+        return
+
+    if intent == "vision_mode":
+        cancel_event.set()
+        prompt = content or user_input
+        yield f"__VISION__{prompt}"
         return
 
     if intent == "ui_show":
@@ -407,7 +420,7 @@ def ask_mara_stream(user_input: str):
         yield response_text
         return
 
-    # ── Intent normal → consomme le stream Sonnet déjà en cours ──────────────
+    # ── Normal intent → consume the Sonnet stream already running ────────────
     conversation_history.append({"role": "user", "content": user_input})
 
     full_response = ""
@@ -420,11 +433,11 @@ def ask_mara_stream(user_input: str):
 
     conversation_history.append({"role": "assistant", "content": full_response})
 
-    # Limite l'historique en mémoire
+    # Keep history size in check
     if len(conversation_history) > MAX_HISTORY:
         conversation_history[:] = conversation_history[-MAX_HISTORY:]
 
-    # Extraction mémoire silencieuse en arrière-plan
+    # Silent background memory extraction
     threading.Thread(
         target=_extract_and_save,
         args=(user_input, language),
@@ -435,4 +448,4 @@ def ask_mara_stream(user_input: str):
 def clear_session():
     global conversation_history
     conversation_history = []
-    print("[Session] Historique effacé.")
+    print("[Session] History cleared.")
