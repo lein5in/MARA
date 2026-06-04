@@ -1,10 +1,11 @@
 # Environnement virtuel
 venv/
 env/
+
+# Variables d'environnement
 .env
 
-# Clés API et secrets
-.env
+# Config et secrets
 config.py
 secrets.json
 
@@ -22,11 +23,17 @@ build/
 # Mémoire MARA (données personnelles)
 memory/mara.key
 memory/mara_memory.enc
-*.json
+memory/mara_credentials.enc
 
 # Audio temporaire
 *.wav
 *.mp3
 
-# Credentials MARA
-memory/mara_credentials.enc
+# Screenshots MARA
+Screenshots/
+
+# Fichiers de lancement (chemins spécifiques à la machine)
+launch_mara.bat
+launch_mara.vbs
+
+assets/app_registry.json
