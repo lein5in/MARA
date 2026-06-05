@@ -145,4 +145,4 @@ MARA is not a weekend project. It is an ongoing system I use every day and conti
 
 ---
 
-*Built by Ibrahim — Ottawa, 2025–2026*
+*Built by Ibrahim — Ottawa, 2026*
