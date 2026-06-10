@@ -38,6 +38,7 @@ def main():
     worker.sig_password_mode.connect(window.on_password_mode)
     worker.sig_show.connect(window.show)
     worker.sig_hide.connect(window.hide)
+    worker.sig_visual.connect(window.on_visual)
 
     # Signaux → orbe
     worker.sig_status.connect(orb.set_state)

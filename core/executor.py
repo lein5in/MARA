@@ -90,6 +90,10 @@ def execute(actions: list) -> list[str]:
             # ── Screenshots ───────────────────────────────────────────────────
             elif action_type == "screenshot":
                 result = system.take_screenshot(action.get("filename"))
+            
+            elif action_type == "visual_render":
+                result = action.get("html", "")
+                
             # ── Auto-contrôle ─────────────────────────────────────────────────
             elif action_type == "pause":
                 result = system.set_pause(action.get("duration", ""), _memory)

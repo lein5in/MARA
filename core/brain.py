@@ -126,6 +126,7 @@ Rules:
 INTENT_PROMPT = """You are an intent classifier for a personal vocal assistant.
 
 Analyze the message and return the intent from these categories:
+- "visual_output" → the user asks for a graph, chart, diagram, schema, table, structured summary, or any visual representation of data or information
 - "memory_query"  → the user EXPLICITLY asks to see what MARA knows/has memorized about them
 - "memory_add"    → the user wants to force MARA to memorize something explicitly
 - "memory_forget" → the user wants to erase the last memorized info
@@ -393,6 +394,12 @@ def ask_mara_stream(user_input: str):
     system.set_current_lang(language)
 
     # ── Non-normal intents → cancel Sonnet ───────────────────────────────────
+    if intent == "visual_output" :
+        cancel_event.set()
+        prompt = content or user_input
+        yield f"__VISUAL__{prompt}"
+        return 
+    
     if intent == "work_mode":
         cancel_event.set()
         yield f"__WORK_MODE__{language}"
