@@ -700,7 +700,7 @@ Rules:
         try:
             client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
             response = client.messages.create(
-                model="claude-sonnet-4-6",
+                model="claude-sonnet-5",
                 max_tokens=4096,
                 system=self._VISUAL_SYSTEM,
                 messages=[{"role": "user", "content": prompt}]
@@ -959,7 +959,7 @@ Rules:
             system_prompt = _build_system_prompt()
 
             response = client.messages.create(
-                model="claude-sonnet-4-6",
+                model="claude-sonnet-5",
                 max_tokens=500,
                 system=system_prompt,
                 messages=[{

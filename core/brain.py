@@ -13,6 +13,23 @@ load_dotenv()
 client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 USER_NAME = os.getenv("USER_NAME", "")
 
+ABOUT_USER = f"""
+ABOUT {USER_NAME}
+- Computer Science student (Specialized, Co-op) at the University of Ottawa, class of 2028.
+- International Student Merit Scholarship recipient.
+- Coursework: Data Structures and Algorithms, Computer Architecture, Software Engineering.
+- Worked as a Data Annotation & AI Training Specialist (DataAnnotation, remote) — annotated ML datasets, built Python automation scripts, analyzed model outputs.
+- Builder of multiple full-stack and AI projects: MARA (this assistant), Fretify (audio-to-guitar-tab AI app), Seren (Chrome extension AI study toolbar with FastAPI/React/PostgreSQL backend).
+- Skilled in Java, Python, JavaScript, TypeScript, SQL, React, FastAPI, PyQt5, Selenium, CUDA/GPU inference.
+- Bilingual: English and French.
+- Loves programming and deep thinking — genuinely enjoys reasoning through problems, not just shipping code.
+
+PERSONALITY ADJUSTMENT FOR {USER_NAME}
+- Be conversational and genuinely interested in what {USER_NAME} is doing, not just transactional.
+- Tease {USER_NAME} often, light and friendly mockery — like a close friend who knows him well, not an assistant.
+- Do not ask unnecessary clarifying questions when context is already known or guessable. Make a reasonable assumption and move forward.
+"""
+
 memory = Memory()
 
 # Limit history to last N messages (N/2 exchanges)
@@ -29,6 +46,7 @@ You anticipate. If {USER_NAME} asks the time in Dubai, you give the time — not
 You are capable of light conversation and humor when the context calls for it — like JARVIS with Tony, not like a robot.
 You have character but remain accessible and pleasant.
 
+{ABOUT_USER}
 FORMAT
 Reply ONLY in natural text — zero markdown, zero emoji, zero stylistic capitals.
 1 to 2 sentences maximum unless {USER_NAME} explicitly asks for more.
@@ -151,8 +169,8 @@ Analyze the message and return the intent from these categories:
 - "normal"        → any other message
 
 Reply ONLY with this JSON, with no surrounding text:
-{"intent": "memory_query|memory_add|memory_forget|memory_reset|session_reset|work_mode|vision_mode|ui_show|ui_hide|normal", "content": "the info to memorize if intent=memory_add, the question asked about the screen if intent=vision_mode, otherwise null", "language": "fr|en|ar"}"""
-
+{"intent": "memory_query|memory_add|memory_forget|memory_reset|session_reset|work_mode|vision_mode|visual_output|ui_show|ui_hide|normal", "content": "the info to memorize if intent=memory_add, the question asked about the screen if intent=vision_mode, the visual request if intent=visual_output, otherwise null", "language": "fr|en|ar"}
+"""
 
 WORK_MODE_ASK = {
     "fr": "Work mode on. What folder do you want to open in VS Code?",
@@ -366,7 +384,7 @@ def ask_mara_stream(user_input: str):
                 {"role": "user", "content": user_input}
             ]
             with client.messages.stream(
-                model="claude-sonnet-4-6",
+                model="claude-sonnet-5",
                 max_tokens=1024,
                 system=_build_system_prompt(),
                 messages=msgs
