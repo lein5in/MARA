@@ -1,6 +1,7 @@
 import os
 import re
 import subprocess
+import time
 import pyautogui
 import psutil
 from pathlib import Path
@@ -9,13 +10,10 @@ from core.browser import browser
 from core import system
 from memory.memory import Memory
 
-# ─── Registre apps — chargé une seule fois au démarrage ──────────────────────
 _registry = get_registry()
 
-# ─── Mémoire — partagée avec brain.py via le même fichier chiffré ─────────────
 _memory = Memory()
 
-# ─── Actions sensibles qui nécessitent une confirmation ───────────────────────
 PROTOCOL_APPS = {
     "ms-windows-store":     "ms-windows-store:",
     "ms-windows-store:":    "ms-windows-store:",
@@ -40,18 +38,12 @@ PROTOCOL_APPS = {
 
 SENSITIVE_ACTIONS = {"delete", "shutdown", "restart", "format", "browser_delete_credentials"}
 
-# ─── Executor principal ───────────────────────────────────────────────────────
-
 def execute(actions: list) -> list[str]:
-    """
-    Reçoit une liste d'actions JSON de Claude et les exécute.
-    Retourne une liste de résultats pour chaque action.
-    """
     results = []
     for action in actions:
         action_type = action.get("type", "").lower()
         try:
-            # ── Apps & fichiers ───────────────────────────────────────────────
+
             if action_type == "run":
                 result = _run(action)
             elif action_type == "open":
@@ -66,7 +58,7 @@ def execute(actions: list) -> list[str]:
                 result = _search(action)
             elif action_type == "open_with":
                 result = _open_with(action)
-            # ── Volume ────────────────────────────────────────────────────────
+
             elif action_type == "set_volume":
                 result = system.set_volume(action.get("level", 50))
             elif action_type == "get_volume":
@@ -75,37 +67,37 @@ def execute(actions: list) -> list[str]:
                 result = system.mute()
             elif action_type == "unmute":
                 result = system.unmute()
-            # ── Luminosité ────────────────────────────────────────────────────
+
             elif action_type == "set_brightness":
                 result = system.set_brightness(action.get("level", 80))
             elif action_type == "get_brightness":
                 result = system.get_brightness()
-            # ── WiFi ──────────────────────────────────────────────────────────
+
             elif action_type == "wifi_connect":
                 result = system.wifi_connect(action.get("ssid"))
             elif action_type == "wifi_disconnect":
                 result = system.wifi_disconnect()
             elif action_type == "wifi_status":
                 result = system.get_wifi_status()
-            # ── Screenshots ───────────────────────────────────────────────────
+            elif action_type == "get_time":
+                result = system.get_time(action.get("timezone"))
+
             elif action_type == "screenshot":
                 result = system.take_screenshot(action.get("filename"))
-            
+
             elif action_type == "visual_render":
                 result = action.get("html", "")
-                
-            # ── Auto-contrôle ─────────────────────────────────────────────────
+
             elif action_type == "pause":
                 result = system.set_pause(action.get("duration", ""), _memory)
             elif action_type == "cancel_pause":
                 result = system.cancel_pause(_memory)
-            
+
             elif action_type == "silent_on":
                 result = system.enable_silent()
             elif action_type == "silent_off":
                 result = system.disable_silent()
 
-            # ── Browser ───────────────────────────────────────────────────────
             elif action_type == "browser_navigate":
                 result = _browser_navigate(action)
             elif action_type == "browser_click":
@@ -134,14 +126,30 @@ def execute(actions: list) -> list[str]:
 
     return results
 
+def _get_foreground_window():
+    try:
+        import win32gui
+        return win32gui.GetForegroundWindow()
+    except Exception:
+        return None
 
-# ─── Primitives système ───────────────────────────────────────────────────────
+def _wait_for_new_window(prev_hwnd, timeout=4.0):
+    try:
+        import win32gui
+    except ImportError:
+        return
+    start = time.time()
+    while time.time() - start < timeout:
+        try:
+            current = win32gui.GetForegroundWindow()
+            if current != prev_hwnd and win32gui.GetWindowText(current):
+                time.sleep(0.35)
+                return
+        except Exception:
+            return
+        time.sleep(0.15)
 
 def _run(action: dict) -> str:
-    """
-    Lance une app en cherchant d'abord dans le registre dynamique,
-    puis protocoles Windows, puis PATH en fallback.
-    """
     command = action.get("command", "")
     if not command:
         return "Commande vide."
@@ -151,7 +159,8 @@ def _run(action: dict) -> str:
     app_name = parts[0].lower()
     args = parts[1:] if len(parts) > 1 else []
 
-    # 0. Protocoles connus — vérifié en premier, peu importe la formulation
+    prev_hwnd = _get_foreground_window()
+
     full_name = command.lower().strip()
     protocol = PROTOCOL_APPS.get(app_name) or PROTOCOL_APPS.get(full_name)
     if protocol:
@@ -161,9 +170,9 @@ def _run(action: dict) -> str:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )
+        _wait_for_new_window(prev_hwnd)
         return f"Lancé : {protocol}"
 
-    # 1. Cherche dans le registre dynamique
     found_path = find_app(app_name, _registry)
     if found_path and Path(found_path).exists():
         subprocess.Popen(
@@ -171,10 +180,9 @@ def _run(action: dict) -> str:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )
+        _wait_for_new_window(prev_hwnd)
         return f"Lancé : {Path(found_path).name}"
-    
 
-    # 2. Protocoles Windows (ms-windows-store:, etc.)
     if ":" in app_name and "/" not in app_name and "\\" not in app_name:
         subprocess.Popen(
             f'start "" {command}',
@@ -182,20 +190,19 @@ def _run(action: dict) -> str:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )
+        _wait_for_new_window(prev_hwnd)
         return f"Lancé : {command}"
 
-    # 3. Fallback PATH
     subprocess.Popen(
         command,
         shell=True,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL
     )
+    _wait_for_new_window(prev_hwnd)
     return f"Lancé : {command}"
 
-
 def _open(action: dict) -> str:
-    """Ouvre un fichier, dossier, ou URL avec l'application par défaut."""
     path = action.get("path", "")
     if not path:
         return "Chemin vide."
@@ -223,27 +230,35 @@ def _open(action: dict) -> str:
     os.startfile(str(resolved))
     return f"Ouvert : {resolved}"
 
-
 def _type(action: dict) -> str:
-    """Tape du texte via pyautogui dans la fenêtre active."""
     text = action.get("text", "")
     if not text:
         return "Texte vide."
-    pyautogui.typewrite(text, interval=0.03)
+    import pyperclip
+    previous = None
+    try:
+        previous = pyperclip.paste()
+    except Exception:
+        pass
+    pyperclip.copy(text)
+    time.sleep(0.15)
+    pyautogui.hotkey("ctrl", "v")
+    time.sleep(0.1)
+    if previous is not None:
+        try:
+            pyperclip.copy(previous)
+        except Exception:
+            pass
     return f"Texte tapé : {text[:30]}..."
 
-
 def _hotkey(action: dict) -> str:
-    """Exécute un raccourci clavier."""
     keys = action.get("keys", [])
     if not keys:
         return "Touches vides."
     pyautogui.hotkey(*keys)
     return f"Raccourci : {'+'.join(keys)}"
 
-
 def _kill(action: dict) -> str:
-    """Ferme une application par nom de processus."""
     process_name = action.get("process", "").lower()
     if not process_name:
         return "Nom de processus vide."
@@ -256,9 +271,7 @@ def _kill(action: dict) -> str:
 
     return f"Fermé : {process_name}" if killed else f"Processus introuvable : {process_name}"
 
-
 def _search(action: dict) -> str:
-    """Cherche un fichier ou dossier par nom et l'ouvre."""
     name = action.get("name", "").lower()
     folder = action.get("folder", "%USERPROFILE%")
     is_folder = action.get("is_folder", False)
@@ -273,9 +286,7 @@ def _search(action: dict) -> str:
     os.startfile(str(path))
     return f"Ouvert : {path.name}"
 
-
 def _open_with(action: dict) -> str:
-    """Cherche un fichier/dossier et l'ouvre avec une app spécifique."""
     name = action.get("name", "").lower()
     app = action.get("app", "").lower()
     folder = action.get("folder", "%USERPROFILE%")
@@ -299,15 +310,11 @@ def _open_with(action: dict) -> str:
     )
     return f"Ouvert : {target.name} dans {Path(app_path).stem if app_path != app else app}"
 
-
-# ─── Primitives browser ───────────────────────────────────────────────────────
-
 def _browser_navigate(action: dict) -> str:
     url = action.get("url", "")
     if not url:
         return "URL vide."
     return browser.navigate(url)
-
 
 def _browser_click(action: dict) -> str:
     selector = action.get("selector", "")
@@ -317,7 +324,6 @@ def _browser_click(action: dict) -> str:
         return "Sélecteur vide."
     return browser.click(selector, by=by, timeout=timeout)
 
-
 def _browser_type(action: dict) -> str:
     selector = action.get("selector", "")
     text = action.get("text", "")
@@ -326,13 +332,11 @@ def _browser_type(action: dict) -> str:
         return "Sélecteur ou texte manquant."
     return browser.type_text(selector, text, by=by)
 
-
 def _browser_login(action: dict) -> str:
     site = action.get("site", "")
     if not site:
         return "Site manquant."
     return browser.login(site)
-
 
 def _browser_save_credentials(action: dict) -> str:
     site = action.get("site", "")
@@ -342,13 +346,11 @@ def _browser_save_credentials(action: dict) -> str:
         return "Site, email ou mot de passe manquant."
     return browser.save_credential(site, email, password)
 
-
 def _browser_delete_credentials(action: dict) -> str:
     site = action.get("site", "")
     if not site:
         return "Site manquant."
     return browser.delete_credential(site)
-
 
 def _browser_wait(action: dict) -> str:
     selector = action.get("selector", "")
@@ -358,7 +360,6 @@ def _browser_wait(action: dict) -> str:
         return "Sélecteur vide."
     return browser.wait_for(selector, by=by, timeout=timeout)
 
-
 def _browser_read(action: dict) -> str:
     selector = action.get("selector", "")
     by = action.get("by", "css")
@@ -366,17 +367,67 @@ def _browser_read(action: dict) -> str:
         return browser.read_page()
     return browser.read_element(selector, by=by)
 
-
 def _browser_close(action: dict) -> str:
     return browser.close()
 
+def _windows_search(name: str, folder: str | None, find_folder: bool) -> Path | None:
+    import pythoncom
+    import win32com.client
+    from urllib.parse import urlparse, unquote
 
-# ─── Utilitaire fichiers ──────────────────────────────────────────────────────
+    try:
+        pythoncom.CoInitialize()
+    except Exception:
+        pass
+
+    conn = win32com.client.Dispatch("ADODB.Connection")
+    conn.Open("Provider=Search.CollatorDSO;Extended Properties='Application=Windows';")
+    rs = win32com.client.Dispatch("ADODB.Recordset")
+
+    kind_filter = "System.Kind = 'folder'" if find_folder else "System.Kind <> 'folder'"
+
+    tokens = re.findall(r"[A-Za-z0-9]+", name)
+    if not tokens:
+        return None
+    contains_expr = " AND ".join(f'"{t}*"' for t in tokens)
+    query = (
+        f"SELECT TOP 1 System.ItemUrl FROM SystemIndex "
+        f"WHERE CONTAINS(System.FileName, '{contains_expr}') AND {kind_filter} "
+        f"ORDER BY System.DateModified DESC"
+    )
+
+    try:
+        rs.Open(query, conn)
+        if not rs.EOF:
+            url = rs.Fields.Item("System.ItemUrl").Value
+            if url:
+                parsed = urlparse(url)
+                real_path = unquote(parsed.path).lstrip("/")
+                real_path = real_path.replace("/", "\\")
+                print(f"[Search] Trouvé via index Windows : {real_path}")
+                return Path(real_path)
+        print(f"[Search] Index Windows : aucun résultat pour '{name}'")
+        return None
+    finally:
+        rs.Close()
+        conn.Close()
+
+def _matches_tokens(candidate_name: str, tokens: list[str]) -> bool:
+    lname = candidate_name.lower()
+    return all(t in lname for t in tokens)
 
 def _find_file(name: str, folder: str, find_folder: bool = False) -> Path | None:
-    """Cherche un fichier ou dossier par nom partiel."""
     name = name.lower()
+    tokens = re.findall(r"[a-z0-9]+", name)
 
+    try:
+        result = _windows_search(name, folder, find_folder)
+        if result and result.exists():
+            return result
+    except Exception as e:
+        print(f"[Search] Windows Search indisponible, fallback scan disque : {e}")
+
+    print(f"[Search] Fallback scan disque pour '{name}'")
     priority_folders = [
         Path.home() / "Documents",
         Path.home() / "Desktop",
@@ -389,9 +440,9 @@ def _find_file(name: str, folder: str, find_folder: bool = False) -> Path | None
             continue
         try:
             if find_folder:
-                matches = [p for p in search_path.rglob(f"*{name}*") if p.is_dir()]
+                matches = [p for p in search_path.rglob("*") if p.is_dir() and _matches_tokens(p.name, tokens)]
             else:
-                matches = [p for p in search_path.rglob(f"*{name}*") if p.is_file() and p.suffix.lower() != ".lnk"]
+                matches = [p for p in search_path.rglob("*") if p.is_file() and p.suffix.lower() != ".lnk" and _matches_tokens(p.name, tokens)]
             if matches:
                 return matches[0]
         except PermissionError:
@@ -400,9 +451,9 @@ def _find_file(name: str, folder: str, find_folder: bool = False) -> Path | None
     home = Path.home()
     try:
         if find_folder:
-            matches = [p for p in home.glob(f"**/*{name}*") if p.is_dir() and len(p.relative_to(home).parts) <= 3]
+            matches = [p for p in home.glob("**/*") if p.is_dir() and _matches_tokens(p.name, tokens) and len(p.relative_to(home).parts) <= 3]
         else:
-            matches = [p for p in home.glob(f"**/*{name}*") if p.is_file() and p.suffix.lower() != ".lnk" and len(p.relative_to(home).parts) <= 3]
+            matches = [p for p in home.glob("**/*") if p.is_file() and p.suffix.lower() != ".lnk" and _matches_tokens(p.name, tokens) and len(p.relative_to(home).parts) <= 3]
         if matches:
             return matches[0]
     except PermissionError:
@@ -410,19 +461,13 @@ def _find_file(name: str, folder: str, find_folder: bool = False) -> Path | None
 
     return None
 
-
-# ─── Utilitaires ─────────────────────────────────────────────────────────────
-
 def needs_confirmation(actions: list) -> bool:
-    """Retourne True si une des actions est sensible et nécessite confirmation."""
     for action in actions:
         if action.get("type", "").lower() in SENSITIVE_ACTIONS:
             return True
     return False
 
-
 def list_running_apps() -> list[str]:
-    """Retourne la liste des applications actuellement ouvertes."""
     apps = set()
     for proc in psutil.process_iter(['name']):
         name = proc.info.get('name', '')

@@ -1,5 +1,5 @@
-# Wake word
-openwakeword
+# Horloge
+tzdata
 
 # Speech-to-Text
 openai-whisper
@@ -11,6 +11,10 @@ numpy
 
 # Cerveau IA
 anthropic
+
+# Recherche fichiers indexée
+pywin32
+pyperclip
 
 # Contrôle système
 pyautogui

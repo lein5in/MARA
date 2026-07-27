@@ -3,6 +3,7 @@ import re
 import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 try:
     from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
@@ -31,7 +32,6 @@ except ImportError:
 SCREENSHOTS_DIR = Path.home() / "Pictures" / "Screenshots"
 SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
 
-# ─── Langue courante ──────────────────────────────────────────────────────────
 _current_lang = "en"
 
 def set_current_lang(lang: str):
@@ -40,7 +40,6 @@ def set_current_lang(lang: str):
     if lang in ("fr", "en", "ar"):
         _current_lang = lang
 
-# ─── Silent mode ──────────────────────────────────────────────────────────────
 _silent_mode = False
 
 def set_silent(val: bool):
@@ -71,7 +70,6 @@ def disable_silent() -> str:
     set_silent(False)
     return _SILENT_OFF.get(_current_lang, _SILENT_OFF["en"])
 
-# ─── Traductions pause ────────────────────────────────────────────────────────
 _PAUSE_RESPONSES = {
     "fr": "Je me désactive pour {duration}. Réveil à {wake_time}.",
     "en": "Going quiet for {duration}. I'll be back at {wake_time}.",
@@ -119,10 +117,6 @@ def _normalize_numbers(text: str) -> str:
     for word, num in _WORD_TO_NUM.items():
         text = re.sub(rf"\b{word}\b", str(num), text, flags=re.IGNORECASE)
     return text
-
-# ══════════════════════════════════════════════════════════════════════════════
-# VOLUME
-# ══════════════════════════════════════════════════════════════════════════════
 
 _volume_interface = None
 
@@ -186,10 +180,6 @@ def unmute() -> str:
     except Exception as e:
         return f"Erreur unmute : {e}"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# LUMINOSITÉ
-# ══════════════════════════════════════════════════════════════════════════════
-
 def set_brightness(level: int) -> str:
     if not _SBC_OK:
         return "Contrôle luminosité non disponible."
@@ -210,10 +200,6 @@ def get_brightness() -> str:
         return f"Luminosité actuelle : {level}%."
     except Exception as e:
         return f"Erreur lecture luminosité : {e}"
-
-# ══════════════════════════════════════════════════════════════════════════════
-# WIFI
-# ══════════════════════════════════════════════════════════════════════════════
 
 def wifi_disconnect() -> str:
     try:
@@ -239,6 +225,16 @@ def wifi_connect(ssid: str | None = None) -> str:
     except Exception as e:
         return f"Erreur WiFi : {e}"
 
+def get_time(timezone: str | None = None) -> str:
+    try:
+        if timezone:
+            now = datetime.now(ZoneInfo(timezone))
+            return f"{now.strftime('%A %d %B %Y, %H:%M')} ({timezone})"
+        now = datetime.now()
+        return now.strftime('%A %d %B %Y, %H:%M')
+    except Exception as e:
+        return f"Erreur horloge : {e}"
+
 def get_wifi_status() -> str:
     try:
         result = subprocess.run(["netsh", "wlan", "show", "interfaces"], capture_output=True, text=True)
@@ -252,10 +248,6 @@ def get_wifi_status() -> str:
         return f"WiFi déconnecté (dernier réseau : {ssid})."
     except Exception as e:
         return f"Erreur lecture WiFi : {e}"
-
-# ══════════════════════════════════════════════════════════════════════════════
-# SCREENSHOTS
-# ══════════════════════════════════════════════════════════════════════════════
 
 def take_screenshot(filename: str | None = None) -> str:
     if not _SCREENSHOT_OK:
@@ -285,10 +277,6 @@ def take_screenshot_for_vision() -> str | None:
     except Exception as e:
         print(f"[System] Erreur screenshot vision : {e}")
         return None
-
-# ══════════════════════════════════════════════════════════════════════════════
-# AUTO-CONTRÔLE
-# ══════════════════════════════════════════════════════════════════════════════
 
 _DURATION_PATTERNS = [
     (r"(\d+)\s*h(?:ours?|eures?)?",                                              "hours"),

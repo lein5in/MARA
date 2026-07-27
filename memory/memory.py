@@ -9,10 +9,7 @@ load_dotenv()
 MEMORY_FILE = os.path.join(os.path.dirname(__file__), "mara_memory.enc")
 KEY_FILE    = os.path.join(os.path.dirname(__file__), "mara.key")
 
-# ─── Clé de chiffrement ───────────────────────────────────────────────────────
-
 def _load_or_create_key() -> Fernet:
-    """Charge la clé Fernet existante ou en génère une nouvelle."""
     if os.path.exists(KEY_FILE):
         with open(KEY_FILE, "rb") as f:
             key = f.read()
@@ -24,8 +21,6 @@ def _load_or_create_key() -> Fernet:
     return Fernet(key)
 
 _fernet = _load_or_create_key()
-
-# ─── Structure par défaut ─────────────────────────────────────────────────────
 
 def _default_memory() -> dict:
     return {
@@ -39,11 +34,6 @@ def _default_memory() -> dict:
         "last_updated": None
     }
 
-# ─── Classe Memory — Singleton ────────────────────────────────────────────────
-# Un seul objet Memory existe pour toute la durée du process.
-# executor.py, brain.py, main.py — tous obtiennent la même instance.
-# Fini la désynchronisation entre le cache RAM de deux instances séparées.
-
 _instance = None
 
 class Memory:
@@ -53,8 +43,6 @@ class Memory:
             _instance = super().__new__(cls)
             _instance._data = _instance._load()
         return _instance
-
-    # ── I/O chiffré ──────────────────────────────────────────────────────────
 
     def _load(self) -> dict:
         if not os.path.exists(MEMORY_FILE):
@@ -76,8 +64,6 @@ class Memory:
         encrypted = _fernet.encrypt(raw)
         with open(MEMORY_FILE, "wb") as f:
             f.write(encrypted)
-
-    # ── Mémoire utilisateur ───────────────────────────────────────────────────
 
     def add_fact(self, fact: str):
         fact = fact.strip()
@@ -105,14 +91,11 @@ class Memory:
         return None
 
     def clear(self):
-        """Efface toute la mémoire utilisateur (conserve paused_until)."""
         pause = self._data.get("paused_until")
         self._data = _default_memory()
         self._data["paused_until"] = pause
         self._save()
         print("Mémoire effacée.")
-
-    # ── Auto-contrôle ─────────────────────────────────────────────────────────
 
     def set_pause(self, until_iso: str):
         self._data["paused_until"] = until_iso
@@ -126,8 +109,6 @@ class Memory:
         self._data["paused_until"] = None
         self._save()
         print("[System] Pause annulée.")
-
-    # ── Prompt & affichage ────────────────────────────────────────────────────
 
     def get_summary(self) -> str:
         facts = self._data["user"]["facts"]
@@ -152,15 +133,22 @@ class Memory:
         if not facts and not prefs and not ctx:
             return ""
 
-        lines = ["MÉMOIRE LONG TERME — ce que tu sais sur l'utilisateur :"]
+        parts = []
         if facts:
-            lines.append("Faits : " + " | ".join(facts))
+            parts.append("things you already know about them: " + "; ".join(facts))
         if prefs:
-            lines.append("Préférences : " + " | ".join(prefs))
+            parts.append("their habits and preferences: " + "; ".join(prefs))
         if ctx:
-            lines.append("Contexte en cours : " + " | ".join(ctx))
+            parts.append("what's currently going on for them: " + "; ".join(ctx))
 
-        return "\n".join(lines)
+        memory_text = ". ".join(parts)
+
+        return (
+            "Background on the user, for your own awareness only "
+            "(never list, recite, or announce this — only let it surface naturally, "
+            "and only if directly relevant to their current message): "
+            + memory_text
+        )
 
     def debug(self):
         print(json.dumps(self._data, ensure_ascii=False, indent=2))

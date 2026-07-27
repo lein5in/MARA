@@ -16,26 +16,27 @@ from PyQt5.QtWebEngineWidgets import QWebEngineView
 
 from core.brain import _build_system_prompt
 
-# ─── Palette ──────────────────────────────────────────────────────────────────
-BG_MAIN      = "#1a1a1a"
-BG_MSG_MARA  = "#1f1f1f"
-BG_MSG_YOU   = "#191919"
-ACCENT       = "#c8c8c8"
-ACCENT_DIM   = "#606060"
-TEXT_PRIMARY = "#e8e8e8"
-TEXT_SEC     = "#888888"
-TEXT_DIM     = "#3a3a3a"
-TEXT_YOU     = "#aaaaaa"
-BORDER       = "#252525"
-BORDER_LIGHT = "#2e2e2e"
+READ_ACTIONS = {"browser_read", "get_volume", "get_brightness", "wifi_status", "get_time"}
+
+BG_MAIN      = "#14111d"
+BG_MSG_MARA  = "#211d2e"
+BG_MSG_YOU   = "#6c4fe0"
+ACCENT       = "#8a6cf0"
+ACCENT_DIM   = "#5d4bb0"
+ACCENT_GRAD_A = "#8a6cf0"
+ACCENT_GRAD_B = "#5433c9"
+TEXT_PRIMARY = "#eae7f5"
+TEXT_SEC     = "#9d97b8"
+TEXT_DIM     = "#4a4560"
+TEXT_YOU     = "#f0eefc"
+BORDER       = "#221e30"
+BORDER_LIGHT = "#2c273c"
 
 WIN_W = 680
 WIN_H = 700
 
-
 def _font(size: int, bold: bool = False) -> QFont:
     return QFont("Segoe UI", size, QFont.Bold if bold else QFont.Normal)
-
 
 WIN_STYLE = f"""
 QWidget {{
@@ -48,7 +49,7 @@ QScrollBar:vertical {{
     background: transparent; width: 3px; margin: 0;
 }}
 QScrollBar::handle:vertical {{
-    background: #333333; border-radius: 1px; min-height: 30px;
+    background: {BORDER_LIGHT}; border-radius: 1px; min-height: 30px;
 }}
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
 QLineEdit {{
@@ -60,16 +61,51 @@ QLineEdit {{
 
 INPUT_CONTAINER_STYLE = f"""
 QWidget {{
-    background: #202020;
+    background: #1c1829;
     border: 1px solid {BORDER_LIGHT};
-    border-radius: 10px;
+    border-radius: 24px;
 }}
 """
 
+def _brand_avatar(size: int = 32, font_size: int = 14) -> QLabel:
+    lbl = QLabel("M")
+    lbl.setFixedSize(size, size)
+    lbl.setAlignment(Qt.AlignCenter)
+    lbl.setFont(_font(font_size, bold=True))
+    lbl.setStyleSheet(f"""
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {ACCENT_GRAD_A}, stop:1 {ACCENT_GRAD_B});
+        border-radius: {size // 2}px;
+        color: white;
+    """)
+    return lbl
 
-# ══════════════════════════════════════════════════════════════════════════════
-# STATUS DOT
-# ══════════════════════════════════════════════════════════════════════════════
+def _build_brand_header() -> QWidget:
+    wrap = QWidget()
+    lay = QVBoxLayout(wrap)
+    lay.setContentsMargins(0, 36, 0, 28)
+    lay.setSpacing(10)
+    lay.setAlignment(Qt.AlignCenter)
+
+    logo = _brand_avatar(72, 30)
+    logo_row = QHBoxLayout()
+    logo_row.addStretch()
+    logo_row.addWidget(logo)
+    logo_row.addStretch()
+    lay.addLayout(logo_row)
+
+    title = QLabel("MARA")
+    title.setAlignment(Qt.AlignCenter)
+    title.setFont(_font(20, bold=True))
+    title.setStyleSheet(f"color: {TEXT_PRIMARY}; letter-spacing: 4px;")
+    lay.addWidget(title)
+
+    subtitle = QLabel("Your voice AI")
+    subtitle.setAlignment(Qt.AlignCenter)
+    subtitle.setFont(_font(11))
+    subtitle.setStyleSheet(f"color: {TEXT_SEC}; letter-spacing: 1px;")
+    lay.addWidget(subtitle)
+
+    return wrap
 
 class StatusDot(QWidget):
     def __init__(self, parent=None):
@@ -100,11 +136,6 @@ class StatusDot(QWidget):
         p.setPen(Qt.NoPen)
         p.drawEllipse(0, 0, 8, 8)
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# VISUAL WINDOW — rendu HTML pour graphes, schémas, tableaux
-# ══════════════════════════════════════════════════════════════════════════════
-
 class MARAVisualWindow(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -126,7 +157,6 @@ class MARAVisualWindow(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # Topbar
         bar = QWidget()
         bar.setFixedHeight(46)
         bar.setStyleSheet(f"background: {BG_MAIN}; border-bottom: 1px solid {BORDER};")
@@ -161,7 +191,6 @@ class MARAVisualWindow(QWidget):
 
         root.addWidget(bar)
 
-        # WebEngine view
         self._view = QWebEngineView()
         self._view.setStyleSheet("background: #1e1e1e;")
         root.addWidget(self._view, stretch=1)
@@ -184,10 +213,13 @@ class MARAVisualWindow(QWidget):
     def mouseReleaseEvent(self, event):
         self._drag_pos = None
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# MESSAGE BUBBLE
-# ══════════════════════════════════════════════════════════════════════════════
+def _format_display_text(text: str) -> str:
+    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)
+    text = re.sub(r'^#{1,6}\s*', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^```[a-zA-Z]*\n?', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^```\s*$', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^\s*[-*]\s+', '• ', text, flags=re.MULTILINE)
+    return text.strip()
 
 class MessageBubble(QWidget):
     def __init__(self, who: str, text: str = "", parent=None):
@@ -197,59 +229,65 @@ class MessageBubble(QWidget):
         self._build(text)
 
     def _build(self, text: str):
+        is_mara = self.who == "MARA"
+
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(0)
+        outer.setContentsMargins(20, 6, 20, 6)
+        outer.setSpacing(4)
 
-        container = QWidget()
-        container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-        bg = BG_MSG_MARA if self.who == "MARA" else BG_MSG_YOU
-        container.setStyleSheet(f"background: {bg};")
+        row = QHBoxLayout()
+        row.setSpacing(10)
 
-        inner = QVBoxLayout(container)
-        inner.setContentsMargins(28, 18, 28, 18)
-        inner.setSpacing(8)
+        if is_mara:
+            row.addWidget(_brand_avatar(28, 12), alignment=Qt.AlignTop)
+        else:
+            row.addStretch()
 
-        # Header
-        hrow = QHBoxLayout()
-        hrow.setSpacing(12)
+        bubble = QWidget()
+        bubble.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+        bubble.setMaximumWidth(440)
+        bg = BG_MSG_MARA if is_mara else BG_MSG_YOU
+        bubble.setStyleSheet(f"background: {bg}; border-radius: 16px;")
 
-        who_lbl = QLabel(self.who)
-        who_lbl.setFont(_font(13, bold=True))
-        col = ACCENT if self.who == "MARA" else TEXT_SEC
-        who_lbl.setStyleSheet(f"color: {col}; letter-spacing: 1px;")
-        hrow.addWidget(who_lbl)
+        blay = QVBoxLayout(bubble)
+        blay.setContentsMargins(16, 12, 16, 12)
+        blay.setSpacing(6)
 
-        ts = QLabel(datetime.now().strftime("%H:%M"))
-        ts.setFont(_font(11))
-        ts.setStyleSheet(f"color: {TEXT_DIM};")
-        hrow.addWidget(ts)
-        hrow.addStretch()
-        inner.addLayout(hrow)
-
-        # Text
-        self._text_lbl = QLabel(text)
+        self._text_lbl = QLabel(_format_display_text(text))
         self._text_lbl.setWordWrap(True)
         self._text_lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-        self._text_lbl.setFont(_font(14))
-        tcol = TEXT_PRIMARY if self.who == "MARA" else TEXT_YOU
-        self._text_lbl.setStyleSheet(f"color: {tcol};")
+        self._text_lbl.setFont(_font(13))
+        tcol = TEXT_PRIMARY if is_mara else TEXT_YOU
+        self._text_lbl.setStyleSheet(f"color: {tcol}; background: transparent;")
         self._text_lbl.setTextFormat(Qt.PlainText)
-        inner.addWidget(self._text_lbl)
+        blay.addWidget(self._text_lbl)
 
-        # Chips
         self._chips_row = QHBoxLayout()
         self._chips_row.setSpacing(6)
         self._chips_row.setContentsMargins(0, 2, 0, 0)
-        inner.addLayout(self._chips_row)
+        blay.addLayout(self._chips_row)
 
-        outer.addWidget(container)
+        row.addWidget(bubble)
+        if is_mara:
+            row.addStretch()
+
+        outer.addLayout(row)
+
+        if not is_mara:
+            meta = QHBoxLayout()
+            meta.setContentsMargins(0, 0, 4, 0)
+            meta.addStretch()
+            ts = QLabel(datetime.now().strftime("%H:%M") + "  ✓")
+            ts.setFont(_font(9))
+            ts.setStyleSheet(f"color: {TEXT_DIM};")
+            meta.addWidget(ts)
+            outer.addLayout(meta)
 
     def append_text(self, chunk: str):
         self._text_lbl.setText(self._text_lbl.text() + chunk)
 
     def set_text(self, text: str):
-        self._text_lbl.setText(text)
+        self._text_lbl.setText(_format_display_text(text))
 
     def add_chips(self, chips: list):
         while self._chips_row.count():
@@ -269,11 +307,6 @@ class MessageBubble(QWidget):
                 self._chips_row.addWidget(chip)
         self._chips_row.addStretch()
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# FENÊTRE PRINCIPALE
-# ══════════════════════════════════════════════════════════════════════════════
-
 class MARAWindow(QWidget):
     def __init__(self, text_queue: queue.Queue):
         super().__init__()
@@ -288,7 +321,6 @@ class MARAWindow(QWidget):
         self._setup_window()
         self._build_ui()
 
-        # Fenêtre visuelle — créée une fois, réutilisée
         self._visual_win = MARAVisualWindow()
 
     def _setup_window(self):
@@ -316,31 +348,41 @@ class MARAWindow(QWidget):
         bar.setFixedHeight(54)
         bar.setStyleSheet(f"background: {BG_MAIN};")
         lay = QHBoxLayout(bar)
-        lay.setContentsMargins(24, 0, 16, 0)
+        lay.setContentsMargins(20, 0, 16, 0)
         lay.setSpacing(10)
+
+        menu_btn = QPushButton("☰")
+        menu_btn.setFixedSize(30, 30)
+        menu_btn.setFont(_font(14))
+        menu_btn.setStyleSheet(self._icon_btn_style())
+        menu_btn.clicked.connect(self.toggle_fullscreen)
+        lay.addWidget(menu_btn)
 
         self._dot = StatusDot()
         lay.addWidget(self._dot)
 
-        name = QLabel("MARA")
-        name.setFont(_font(14, bold=True))
-        name.setStyleSheet(f"color: {TEXT_PRIMARY}; letter-spacing: 3px;")
-        lay.addWidget(name)
-
-        self._status_lbl = QLabel("OPERATIONAL")
-        self._status_lbl.setFont(_font(10))
-        self._status_lbl.setStyleSheet(f"color: {TEXT_DIM}; letter-spacing: 1px;")
-        lay.addWidget(self._status_lbl)
-
         lay.addStretch()
 
-        for symbol, slot in [("⤢", self.toggle_fullscreen), ("−", self.hide)]:
-            btn = QPushButton(symbol)
-            btn.setFixedSize(30, 30)
-            btn.setFont(_font(13))
-            btn.setStyleSheet(self._icon_btn_style())
-            btn.clicked.connect(slot)
-            lay.addWidget(btn)
+        self._vision_btn = QPushButton("👁")
+        self._vision_btn.setFixedSize(30, 30)
+        self._vision_btn.setFont(_font(13))
+        self._vision_btn.setStyleSheet(self._icon_btn_style())
+        self._vision_btn.clicked.connect(lambda: self._set_mode("VISION"))
+        lay.addWidget(self._vision_btn)
+
+        self._mute_btn = QPushButton("🔊")
+        self._mute_btn.setFixedSize(30, 30)
+        self._mute_btn.setFont(_font(13))
+        self._mute_btn.setStyleSheet(self._icon_btn_style())
+        self._mute_btn.clicked.connect(lambda: self._set_mode("SILENT"))
+        lay.addWidget(self._mute_btn)
+
+        close_btn = QPushButton("−")
+        close_btn.setFixedSize(30, 30)
+        close_btn.setFont(_font(15))
+        close_btn.setStyleSheet(self._icon_btn_style())
+        close_btn.clicked.connect(self.hide)
+        lay.addWidget(close_btn)
 
         return bar
 
@@ -350,6 +392,7 @@ class MARAWindow(QWidget):
         self._log_layout = QVBoxLayout(self._log_inner)
         self._log_layout.setContentsMargins(0, 0, 0, 0)
         self._log_layout.setSpacing(1)
+        self._log_layout.addWidget(_build_brand_header())
         self._log_layout.addStretch()
 
         self._scroll = QScrollArea()
@@ -369,26 +412,32 @@ class MARAWindow(QWidget):
         input_container = QWidget()
         input_container.setStyleSheet(INPUT_CONTAINER_STYLE)
         ilay = QHBoxLayout(input_container)
-        ilay.setContentsMargins(16, 0, 10, 0)
-        ilay.setSpacing(8)
+        ilay.setContentsMargins(18, 0, 8, 0)
+        ilay.setSpacing(10)
+
+        clip_lbl = QLabel("📎")
+        clip_lbl.setFont(_font(13))
+        clip_lbl.setStyleSheet(f"color: {TEXT_DIM}; background: transparent;")
+        ilay.addWidget(clip_lbl)
 
         self._input = QLineEdit()
-        self._input.setPlaceholderText("Message MARA...")
+        self._input.setPlaceholderText("Type your message...")
         self._input.setFont(_font(14))
         self._input.setFixedHeight(48)
         self._input.returnPressed.connect(self._send)
         ilay.addWidget(self._input)
 
         send_btn = QPushButton("↑")
-        send_btn.setFixedSize(34, 34)
+        send_btn.setFixedSize(36, 36)
         send_btn.setFont(_font(15, bold=True))
         send_btn.setStyleSheet(f"""
             QPushButton {{
-                background: {ACCENT_DIM}; border: none; color: {BG_MAIN};
-                border-radius: 7px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {ACCENT_GRAD_A}, stop:1 {ACCENT_GRAD_B});
+                border: none; color: white;
+                border-radius: 18px;
             }}
             QPushButton:hover {{ background: {ACCENT}; }}
-            QPushButton:pressed {{ background: #909090; }}
+            QPushButton:pressed {{ background: {ACCENT_DIM}; }}
         """)
         send_btn.clicked.connect(self._send)
         ilay.addWidget(send_btn)
@@ -398,16 +447,16 @@ class MARAWindow(QWidget):
         mode_row = QHBoxLayout()
         mode_row.setSpacing(8)
         mode_row.setContentsMargins(4, 0, 4, 0)
+        mode_row.addStretch()
 
         self._mode_btns: dict[str, QPushButton] = {}
-        for m in ["SILENT", "VISION"]:
-            btn = QPushButton(m)
-            btn.setFont(_font(10))
-            btn.setFixedHeight(28)
-            btn.setStyleSheet(self._mode_btn_style(False))
-            btn.clicked.connect(lambda _, mode=m: self._set_mode(mode))
-            self._mode_btns[m] = btn
-            mode_row.addWidget(btn)
+        silent_btn = QPushButton("🔇  Silent mode")
+        silent_btn.setFont(_font(10))
+        silent_btn.setFixedHeight(26)
+        silent_btn.setStyleSheet(self._mode_btn_style(False))
+        silent_btn.clicked.connect(lambda: self._set_mode("SILENT"))
+        self._mode_btns["SILENT"] = silent_btn
+        mode_row.addWidget(silent_btn)
 
         mode_row.addStretch()
         wlay.addLayout(mode_row)
@@ -420,37 +469,43 @@ class MARAWindow(QWidget):
         f.setStyleSheet(f"background: {BORDER};")
         return f
 
-    def _icon_btn_style(self) -> str:
+    def _icon_btn_style(self, active: bool = False) -> str:
+        color = ACCENT if active else TEXT_DIM
         return f"""
             QPushButton {{
                 background: transparent; border: none;
-                color: {TEXT_DIM}; border-radius: 4px; font-size: 15px;
+                color: {color}; border-radius: 4px; font-size: 15px;
             }}
-            QPushButton:hover {{ color: {TEXT_SEC}; background: #222222; }}
+            QPushButton:hover {{ color: {TEXT_SEC}; background: #221e30; }}
         """
 
     def _mode_btn_style(self, active: bool) -> str:
         if active:
             return f"""
                 QPushButton {{
-                    background: #272727; border: 1px solid {BORDER_LIGHT};
-                    color: {ACCENT}; border-radius: 5px; padding: 4px 14px;
+                    background: #2a2340; border: 1px solid {ACCENT_DIM};
+                    color: {ACCENT}; border-radius: 13px; padding: 4px 14px;
                     font-family: 'Segoe UI'; font-size: 10px; letter-spacing: 1px;
                 }}
             """
         return f"""
             QPushButton {{
                 background: transparent; border: 1px solid transparent;
-                color: #555555; border-radius: 5px; padding: 4px 14px;
+                color: {TEXT_SEC}; border-radius: 13px; padding: 4px 14px;
                 font-family: 'Segoe UI'; font-size: 10px; letter-spacing: 1px;
             }}
-            QPushButton:hover {{ color: {TEXT_SEC}; border-color: {BORDER}; }}
+            QPushButton:hover {{ color: {TEXT_PRIMARY}; border-color: {BORDER_LIGHT}; }}
         """
 
     def _set_mode(self, mode: str):
         self._mode = "TEXT" if self._mode == mode else mode
-        for m, btn in self._mode_btns.items():
-            btn.setStyleSheet(self._mode_btn_style(m == self._mode))
+        active_silent = self._mode == "SILENT"
+        active_vision = self._mode == "VISION"
+
+        self._mode_btns["SILENT"].setStyleSheet(self._mode_btn_style(active_silent))
+        self._mute_btn.setText("🔇" if active_silent else "🔊")
+        self._mute_btn.setStyleSheet(self._icon_btn_style(active_silent))
+        self._vision_btn.setStyleSheet(self._icon_btn_style(active_vision))
 
     def _send(self):
         text = self._input.text().strip()
@@ -478,10 +533,7 @@ class MARAWindow(QWidget):
             self._scroll.verticalScrollBar().maximum()
         ))
 
-    # ── Slots publics ─────────────────────────────────────────────────────────
-
     def on_status(self, status: str):
-        self._status_lbl.setText(status)
         colors = {
             "THINKING":    "#8888ff",
             "SPEAKING":    "#88cc88",
@@ -532,8 +584,6 @@ class MARAWindow(QWidget):
     def on_visual(self, html: str, label: str):
         self._visual_win.show_html(html, label)
 
-    # ── Window controls ───────────────────────────────────────────────────────
-
     def toggle_fullscreen(self):
         if not self._is_fullscreen:
             self._normal_geometry = self.geometry()
@@ -558,11 +608,6 @@ class MARAWindow(QWidget):
     def mouseReleaseEvent(self, event):
         self._drag_pos = None
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# WORKER THREAD
-# ══════════════════════════════════════════════════════════════════════════════
-
 class MARAWorker(QThread):
     sig_status        = pyqtSignal(str)
     sig_stream_start  = pyqtSignal()
@@ -572,7 +617,7 @@ class MARAWorker(QThread):
     sig_password_mode = pyqtSignal(bool)
     sig_show          = pyqtSignal()
     sig_hide          = pyqtSignal()
-    sig_visual        = pyqtSignal(str, str)   # html, label
+    sig_visual        = pyqtSignal(str, str)
 
     _PWD_KW  = {"password", "mot de passe", "كلمة المرور", "pass"}
     _OFFLINE = {
@@ -582,7 +627,6 @@ class MARAWorker(QThread):
     }
     _WAKE = {"mara"}
 
-    # Prompt système pour la génération de visuels
     _VISUAL_SYSTEM = """You are MARA's visual renderer. Generate a single self-contained HTML page that visually represents the requested data or concept.
 
 Rules:
@@ -684,7 +728,6 @@ Rules:
         execute_fn(actions)
 
     def _handle_visual(self, prompt: str, speak_stream_fn):
-        """Génère un visuel HTML via Claude et l'affiche dans MARAVisualWindow."""
         from anthropic import Anthropic
         import os
         from dotenv import load_dotenv
@@ -692,7 +735,6 @@ Rules:
 
         self.sig_status.emit("THINKING")
 
-        # Message vocal pendant la génération
         thinking_msg = "Generating your visual, one moment."
         self.sig_done.emit(thinking_msg, [])
         speak_stream_fn(iter([thinking_msg]))
@@ -700,26 +742,22 @@ Rules:
         try:
             client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
             response = client.messages.create(
-                model="claude-sonnet-5",
+                model="claude-sonnet-4-6",
                 max_tokens=4096,
                 system=self._VISUAL_SYSTEM,
                 messages=[{"role": "user", "content": prompt}]
             )
             html = response.content[0].text.strip()
 
-            # Nettoyage au cas où Claude aurait quand même mis des fences
             if html.startswith("```"):
                 html = re.sub(r'^```[a-z]*\n?', '', html)
                 html = re.sub(r'\n?```$', '', html)
                 html = html.strip()
 
-            # Déduction du label depuis le prompt
             label = prompt[:48] + ("..." if len(prompt) > 48 else "")
 
-            # Affichage dans la fenêtre visuelle
             self.sig_visual.emit(html, label)
 
-            # Confirmation vocale
             done_msg = "Here it is."
             self.sig_done.emit(done_msg, [])
             speak_stream_fn(iter([done_msg]))
@@ -740,7 +778,6 @@ Rules:
         from memory.memory import Memory
 
         memory = Memory()
-        READ_ACTIONS = {"browser_read", "get_volume", "get_brightness", "wifi_status"}
 
         voice_thread = threading.Thread(
             target=self._voice_loop, args=(listen,), daemon=True
@@ -760,7 +797,6 @@ Rules:
             if not user_input:
                 continue
 
-            # ── Commandes internes ────────────────────────────────────────────
             if user_input.startswith("__CMD__"):
                 cmd = user_input.replace("__CMD__", "")
                 if cmd == "silent_toggle":
@@ -768,10 +804,10 @@ Rules:
                 else:
                     continue
 
-            # ── Vision ────────────────────────────────────────────────────────
             if user_input.startswith("__VISION__"):
                 prompt = user_input.replace("__VISION__", "").strip()
-                self._handle_vision(prompt, system, speak_stream_sentences, ask_mara_stream)
+                self._handle_vision(prompt, system, memory, speak_stream_sentences,
+                                   speak, execute, needs_confirmation, ask_mara_stream)
                 continue
 
             if "quit" in user_input.lower():
@@ -782,12 +818,10 @@ Rules:
             if source == "voice":
                 self.sig_user_msg.emit(user_input)
 
-            # ── Cerveau ───────────────────────────────────────────────────────
             self.sig_status.emit("THINKING")
             stream = ask_mara_stream(user_input)
             first = next(stream, "")
 
-            # ── Intents spéciaux ──────────────────────────────────────────────
             if first.startswith("__WORK_MODE__"):
                 language = first.replace("__WORK_MODE__", "").strip() or "en"
                 self._handle_work_mode(language, speak_stream_sentences, execute,
@@ -819,7 +853,14 @@ Rules:
 
             if first.startswith("__VISION__"):
                 prompt = first.replace("__VISION__", "").strip()
-                self._handle_vision(prompt, system, speak_stream_sentences, ask_mara_stream)
+                self._handle_vision(prompt, system, memory, speak_stream_sentences,
+                                   speak, execute, needs_confirmation, ask_mara_stream)
+                self.sig_status.emit("IDLE")
+                continue
+
+            if first.startswith("__VISION_CODE__"):
+                prompt = first.replace("__VISION_CODE__", "").strip()
+                self._handle_vision_code(prompt, speak_stream_sentences)
                 self.sig_status.emit("IDLE")
                 continue
 
@@ -828,184 +869,174 @@ Rules:
                 self._handle_visual(prompt, speak_stream_sentences)
                 continue
 
-            # ── Streaming ─────────────────────────────────────────────────────
             self.sig_stream_start.emit()
-            full_response = first
-            self.sig_chunk.emit(first)
+            self._consume_stream(stream, first, system, memory, speak_stream_sentences,
+                                 speak, execute, needs_confirmation, ask_mara_stream)
 
-            for chunk in stream:
-                if not self._running:
-                    break
-                full_response += chunk
-                self.sig_chunk.emit(chunk)
+    def _consume_stream(self, stream, first, system, memory, speak_stream_sentences,
+                        speak, execute, needs_confirmation, ask_mara_stream):
+        full_response = first
+        self.sig_chunk.emit(first)
 
-            if system.is_paused(memory):
-                self.sig_done.emit("", [])
-                continue
+        for chunk in stream:
+            if not self._running:
+                break
+            full_response += chunk
+            self.sig_chunk.emit(chunk)
 
-            # ── Parsing JSON ──────────────────────────────────────────────────
-            actions = []
-            vocal = full_response
+        if system.is_paused(memory):
+            self.sig_done.emit("", [])
+            return
 
-            try:
-                m = re.search(r'\{.*"actions"\s*:.*\}', full_response, re.DOTALL)
-                if m:
-                    parsed = json.loads(m.group())
-                    if isinstance(parsed, dict) and "actions" in parsed:
-                        vocal = parsed.get("response", "")
-                        actions = parsed.get("actions", [])
-            except (json.JSONDecodeError, AttributeError):
-                pass
+        actions = []
+        vocal = full_response
 
-            chips = []
-            for a in actions:
-                label = a.get("command") or a.get("site") or a.get("type", "")
-                if label:
-                    chips.append(label)
-
-            if any(kw in vocal.lower() for kw in self._PWD_KW):
-                self.sig_password_mode.emit(True)
-
-            self.sig_done.emit(vocal, chips)
-            print(f"MARA : {vocal or full_response}")
-
-            # ── TTS ───────────────────────────────────────────────────────────
-            if vocal:
-                self.sig_status.emit("SPEAKING")
-                if actions:
-                    speak_stream_sentences(iter([vocal]))
-                else:
-                    speak_stream_sentences(iter([full_response]))
-
-            self.sig_status.emit("OPERATIONAL")
-
-            if not actions:
-                continue
-
-            if needs_confirmation(actions):
-                confirm = "Cette action nécessite ta confirmation. Tu confirmes ?"
-                self.sig_done.emit(confirm, [])
-                print(f"MARA : {confirm}")
-                speak(confirm)
-                reply, _ = self._get_input()
-                if not any(w in (reply or "").lower() for w in ["yes","oui","confirm","go","ok"]):
-                    cancel = "Action annulée."
-                    self.sig_done.emit(cancel, [])
-                    print(f"MARA : {cancel}")
-                    speak(cancel)
-                    continue
-
-            results = execute(actions)
-
-            for action, result in zip(actions, results):
-                atype = action.get("type")
-
-                if atype == "browser_read" and result and not result.startswith("Erreur"):
-                    self.sig_status.emit("THINKING")
-                    self.sig_stream_start.emit()
-                    summary_prompt = (f"Here is the content read from the browser. "
-                                      f"Summarize it naturally and briefly: {result}")
-                    sr = ""
-                    for chunk in ask_mara_stream(summary_prompt):
-                        sr += chunk
-                        self.sig_chunk.emit(chunk)
-                    self.sig_done.emit(sr, [])
-                    print(f"MARA (lecture) : {sr}")
-                    self.sig_status.emit("SPEAKING")
-                    speak_stream_sentences(iter([sr]))
-                    self.sig_status.emit("OPERATIONAL")
-
-                elif atype in READ_ACTIONS and result and not result.startswith("Erreur"):
-                    self.sig_done.emit(result, [])
-                    print(f"MARA ({atype}) : {result}")
-                    self.sig_status.emit("SPEAKING")
-                    speak_stream_sentences(iter([result]))
-                    self.sig_status.emit("OPERATIONAL")
-
-                elif atype == "pause" and result:
-                    self.sig_done.emit(result, [])
-                    print(f"MARA (pause) : {result}")
-                    speak_stream_sentences(iter([result]))
-
-                elif atype in ("silent_on", "silent_off") and result:
-                    self.sig_done.emit(result, [])
-                    print(f"MARA ({atype}) : {result}")
-                    speak_stream_sentences(iter([result]))
-
-    def _handle_vision(self, prompt, system, speak_stream_fn, ask_mara_stream):
         try:
-            import base64, os, re as _re, json as _json
-            from core import system as sys_mod
-            from anthropic import Anthropic
-            from dotenv import load_dotenv
-            load_dotenv()
+            m = re.search(r'\{.*"actions"\s*:.*\}', full_response, re.DOTALL)
+            if m:
+                parsed = json.loads(m.group())
+                if isinstance(parsed, dict) and "actions" in parsed:
+                    vocal = parsed.get("response", "")
+                    actions = parsed.get("actions", [])
+        except (json.JSONDecodeError, AttributeError):
+            pass
 
-            result = sys_mod.take_screenshot_for_vision()
+        chips = []
+        for a in actions:
+            label = a.get("command") or a.get("site") or a.get("type", "")
+            if label:
+                chips.append(label)
 
-            if not result:
-                msg = "I can not take a screenshot right now."
-                self.sig_done.emit(msg, [])
-                print(f"MARA : {msg}")
+        if any(kw in vocal.lower() for kw in self._PWD_KW):
+            self.sig_password_mode.emit(True)
+
+        self.sig_done.emit(vocal, chips)
+        print(f"MARA : {vocal or full_response}")
+
+        if vocal:
+            self.sig_status.emit("SPEAKING")
+            if actions:
+                speak_stream_sentences(iter([vocal]))
+            else:
+                speak_stream_sentences(iter([full_response]))
+
+        self.sig_status.emit("OPERATIONAL")
+
+        if not actions:
+            return
+
+        if needs_confirmation(actions):
+            confirm = "Cette action nécessite ta confirmation. Tu confirmes ?"
+            self.sig_done.emit(confirm, [])
+            print(f"MARA : {confirm}")
+            speak(confirm)
+            reply, _ = self._get_input()
+            if not any(w in (reply or "").lower() for w in ["yes","oui","confirm","go","ok"]):
+                cancel = "Action annulée."
+                self.sig_done.emit(cancel, [])
+                print(f"MARA : {cancel}")
+                speak(cancel)
                 return
 
-            self.sig_status.emit("THINKING")
+        results = execute(actions)
 
-            with open(result, "rb") as f:
-                img_b64 = base64.standard_b64encode(f.read()).decode("utf-8")
+        for action, result in zip(actions, results):
+            atype = action.get("type")
 
-            client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+            if atype == "browser_read" and result and not result.startswith("Erreur"):
+                self.sig_status.emit("THINKING")
+                self.sig_stream_start.emit()
+                summary_prompt = (f"Here is the content read from the browser. "
+                                  f"Summarize it naturally and briefly: {result}")
+                sr = ""
+                for chunk in ask_mara_stream(summary_prompt):
+                    sr += chunk
+                    self.sig_chunk.emit(chunk)
+                self.sig_done.emit(sr, [])
+                print(f"MARA (lecture) : {sr}")
+                self.sig_status.emit("SPEAKING")
+                speak_stream_sentences(iter([sr]))
+                self.sig_status.emit("OPERATIONAL")
 
-            from core.brain import _build_system_prompt
-            system_prompt = _build_system_prompt()
+            elif atype in READ_ACTIONS and result and not result.startswith("Erreur"):
+                self.sig_done.emit(result, [])
+                print(f"MARA ({atype}) : {result}")
+                self.sig_status.emit("SPEAKING")
+                speak_stream_sentences(iter([result]))
+                self.sig_status.emit("OPERATIONAL")
 
-            response = client.messages.create(
-                model="claude-sonnet-5",
-                max_tokens=500,
-                system=system_prompt,
-                messages=[{
-                    "role": "user",
-                    "content": [
-                        {"type": "image", "source": {
-                            "type": "base64", "media_type": "image/png", "data": img_b64
-                        }},
-                        {"type": "text", "text": prompt or "Describe what you see on this screen."}
-                    ]
-                }]
-            )
-            answer = response.content[0].text
+            elif atype == "pause" and result:
+                self.sig_done.emit(result, [])
+                print(f"MARA (pause) : {result}")
+                speak_stream_sentences(iter([result]))
 
-            vocal = answer
-            actions = []
-            try:
-                m = _re.search(r'\{.*"actions"\s*:.*\}', answer, _re.DOTALL)
-                if m:
-                    parsed = _json.loads(m.group())
-                    if isinstance(parsed, dict) and "actions" in parsed:
-                        vocal = parsed.get("response", answer)
-                        actions = parsed.get("actions", [])
-            except (_json.JSONDecodeError, AttributeError):
-                pass
+            elif atype in ("silent_on", "silent_off") and result:
+                self.sig_done.emit(result, [])
+                print(f"MARA ({atype}) : {result}")
+                speak_stream_sentences(iter([result]))
 
-            chips = [a.get("type", "") for a in actions]
-            self.sig_stream_start.emit()
-            self.sig_chunk.emit(vocal)
-            self.sig_done.emit(vocal, chips)
-            print(f"MARA (vision) : {vocal}")
+    def _handle_vision(self, prompt, system, memory, speak_stream_sentences,
+                       speak, execute, needs_confirmation, ask_mara_stream):
+        from core import system as sys_mod
+        import base64
 
-            self.sig_status.emit("SPEAKING")
-            speak_stream_fn(iter([vocal]))
-
-            if actions:
-                from core.executor import execute
-                execute(actions)
-
-            self.sig_status.emit("IDLE")
-
-        except Exception as e:
-            msg = f"Vision error : {e}"
+        result = sys_mod.take_screenshot_for_vision()
+        if not result:
+            msg = "I can not take a screenshot right now."
             self.sig_done.emit(msg, [])
-            self.sig_status.emit("IDLE")
             print(f"MARA : {msg}")
+            return
+
+        self.sig_status.emit("THINKING")
+
+        with open(result, "rb") as f:
+            img_b64 = base64.standard_b64encode(f.read()).decode("utf-8")
+
+        from core.brain import ask_mara_vision_stream
+        stream = ask_mara_vision_stream(prompt, img_b64)
+        first = next(stream, "")
+
+        self.sig_stream_start.emit()
+        self._consume_stream(stream, first, system, memory, speak_stream_sentences,
+                             speak, execute, needs_confirmation, ask_mara_stream)
+        self.sig_status.emit("IDLE")
+
+    def _handle_vision_code(self, prompt, speak_stream_sentences):
+        from core import system as sys_mod
+        import base64
+
+        result = sys_mod.take_screenshot_for_vision()
+        if not result:
+            msg = "I can not take a screenshot right now."
+            self.sig_done.emit(msg, [])
+            print(f"MARA : {msg}")
+            return
+
+        self.sig_status.emit("THINKING")
+        thinking_msg = "Let me look at your code."
+        self.sig_done.emit(thinking_msg, [])
+        print(f"MARA : {thinking_msg}")
+        speak_stream_sentences(iter([thinking_msg]))
+
+        with open(result, "rb") as f:
+            img_b64 = base64.standard_b64encode(f.read()).decode("utf-8")
+
+        from core.brain import ask_mara_vision_code
+        summary, html = ask_mara_vision_code(prompt, img_b64)
+
+        self.sig_stream_start.emit()
+        self.sig_chunk.emit(summary)
+        self.sig_done.emit(summary, [])
+        print(f"MARA (vision code) : {summary}")
+
+        self.sig_status.emit("SPEAKING")
+        speak_stream_sentences(iter([summary]))
+
+        if html:
+            label = (prompt or "Code review")[:48]
+            self.sig_visual.emit(html, label)
+
+        self.sig_status.emit("IDLE")
 
     def stop(self):
         self._running = False
