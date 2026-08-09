@@ -2,13 +2,13 @@ import json
 from pathlib import Path
 from cryptography.fernet import Fernet
 
-# ─── Chemins ──────────────────────────────────────────────────────────────────
+
 CREDENTIALS_DIR  = Path(__file__).parent
 KEY_PATH         = CREDENTIALS_DIR / "mara.key"
 CREDENTIALS_PATH = CREDENTIALS_DIR / "mara_credentials.enc"
 
 
-# ─── Credentials Manager ──────────────────────────────────────────────────────
+
 
 class CredentialsManager:
     """
@@ -22,7 +22,7 @@ class CredentialsManager:
         self._fernet = Fernet(self._key)
         self._data = self._load()
 
-    # ─── Clé ──────────────────────────────────────────────────────────────────
+     
 
     def _load_or_create_key(self) -> bytes:
         if KEY_PATH.exists():
@@ -32,7 +32,6 @@ class CredentialsManager:
         print("[Credentials] Clé générée.")
         return key
 
-    # ─── Persistance ──────────────────────────────────────────────────────────
 
     def _load(self) -> dict:
         if not CREDENTIALS_PATH.exists():
@@ -50,7 +49,7 @@ class CredentialsManager:
         encrypted = self._fernet.encrypt(raw)
         CREDENTIALS_PATH.write_bytes(encrypted)
 
-    # ─── API publique ─────────────────────────────────────────────────────────
+    
 
     def save(self, site: str, email: str, password: str) -> str:
         """Sauvegarde les identifiants d'un site."""
@@ -81,5 +80,5 @@ class CredentialsManager:
         return site.lower() in self._data
 
 
-# ─── Singleton global ─────────────────────────────────────────────────────────
+
 credentials = CredentialsManager()

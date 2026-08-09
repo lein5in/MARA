@@ -4,7 +4,7 @@ from PyQt5.QtWidgets import QWidget, QDesktopWidget
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QPainter, QColor, QRadialGradient, QPen, QBrush
 
-# ─── Taille ───────────────────────────────────────────────────────────────────
+
 ORB_SIZE = 180
 ORB_R    = 77
 CX       = ORB_SIZE / 2
@@ -12,7 +12,7 @@ CY       = ORB_SIZE / 2
 
 FADE_STEPS = 20
 
-# ─── Couleurs par état ────────────────────────────────────────────────────────
+
 STATE_COLORS = {
     "LISTENING": {
         "node_front": QColor(78, 204, 163),
@@ -47,15 +47,12 @@ STATE_COLORS = {
 }
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# NODE 3D
-# ══════════════════════════════════════════════════════════════════════════════
 
 class Node3D:
     def __init__(self, theta: float, phi: float):
-        # Coordonnées sphériques
-        self.theta = theta  # longitude
-        self.phi   = phi    # latitude
+         
+        self.theta = theta   
+        self.phi   = phi     
         self.base_r = random.uniform(2.0, 3.5)
         self.phase  = random.uniform(0, math.pi * 2)
         self.speed  = random.uniform(0.3, 0.8)
@@ -84,9 +81,6 @@ class Pulse3D:
         self.t = min(1.0, self.t + self.speed)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# ORB WIDGET
-# ══════════════════════════════════════════════════════════════════════════════
 
 class MARAOrb(QWidget):
 
@@ -96,8 +90,8 @@ class MARAOrb(QWidget):
         self._alpha   = 0
         self._fading  = None
         self._tick    = 0
-        self._rot_y   = 0.0   # rotation globe
-        self._rot_x   = 0.12  # léger tilt vertical
+        self._rot_y   = 0.0    
+        self._rot_x   = 0.12   
         self._nodes:  list[Node3D]  = []
         self._edges:  list[tuple]   = []
         self._pulses: list[Pulse3D] = []
@@ -107,9 +101,9 @@ class MARAOrb(QWidget):
 
         self._timer = QTimer()
         self._timer.timeout.connect(self._frame)
-        self._timer.start(33)  # ~30fps
+        self._timer.start(33)   
 
-    # ── Fenêtre transparente ──────────────────────────────────────────────────
+   
 
     def _setup_window(self):
         self.setFixedSize(ORB_SIZE, ORB_SIZE)
@@ -127,12 +121,12 @@ class MARAOrb(QWidget):
         y = screen.height() - ORB_SIZE - 52
         self.move(x, y)
 
-    # ── Réseau de nœuds sur sphère ────────────────────────────────────────────
+    
 
     def _gen_network(self):
         self._nodes = []
 
-        # Distribution uniforme sur sphère (Fibonacci lattice)
+        
         n = 28
         golden = math.pi * (3 - math.sqrt(5))
         for i in range(n):
@@ -140,13 +134,12 @@ class MARAOrb(QWidget):
             radius = math.sqrt(max(0, 1 - y_val * y_val))
             theta  = golden * i
             phi    = math.asin(max(-1, min(1, y_val)))
-            # theta ici = vrai theta sur sphère
+           
             node_theta = math.atan2(radius * math.sin(theta), radius * math.cos(theta))
             self._nodes.append(Node3D(node_theta, phi))
 
-        # Connexions — angle max entre deux nœuds sur la sphère
         self._edges = []
-        max_angle = 0.72  # ~41 degrés
+        max_angle = 0.72  
         for i in range(len(self._nodes)):
             for j in range(i + 1, len(self._nodes)):
                 xi, yi, zi = self._nodes[i].xyz()
@@ -157,37 +150,37 @@ class MARAOrb(QWidget):
                 if angle < max_angle:
                     self._edges.append((i, j, angle))
 
-    # ── Projection 3D → 2D ───────────────────────────────────────────────────
+  
 
     def _project(self, node: Node3D):
         """Projette un nœud 3D en 2D avec rotation et perspective."""
         x, y, z = node.xyz()
 
-        # Rotation Y (tourne autour de l'axe vertical)
+        
         ry = self._rot_y
         x2 = x * math.cos(ry) - y * math.sin(ry)
         y2 = x * math.sin(ry) + y * math.cos(ry)
         z2 = z
 
-        # Léger tilt X
+        
         rx = self._rot_x
         y3 = y2 * math.cos(rx) - z2 * math.sin(rx)
         z3 = y2 * math.sin(rx) + z2 * math.cos(rx)
         x3 = x2
 
-        # Perspective douce
+        
         fov  = 2.8
         persp = fov / (fov + z3 * 0.3)
 
         px = CX + x3 * ORB_R * 0.88 * persp
         py = CY - y3 * ORB_R * 0.88 * persp
 
-        # depth : -1 (derrière) à +1 (devant)
+        
         depth = z3
 
         return px, py, depth, persp
 
-    # ── Spawn pulse ───────────────────────────────────────────────────────────
+    
 
     def _spawn_pulse(self):
         if not self._edges:
@@ -223,7 +216,7 @@ class MARAOrb(QWidget):
             "SPEAKING":  0.006,
         }.get(self._state, 0.002)
 
-    # ── Fade ──────────────────────────────────────────────────────────────────
+    
 
     def _fade_in(self):
         self._fading = "in"
@@ -247,7 +240,7 @@ class MARAOrb(QWidget):
                 self.hide()
                 self._pulses.clear()
 
-    # ── Slot public ───────────────────────────────────────────────────────────
+    
 
     def set_state(self, state: str):
         if state in ("OPERATIONAL", "PAUSED"):
@@ -261,7 +254,7 @@ class MARAOrb(QWidget):
         elif state != "IDLE" and prev == "IDLE":
             self._fade_in()
 
-    # ── Frame ─────────────────────────────────────────────────────────────────
+    
 
     def _frame(self):
         self._tick += 1
@@ -270,10 +263,10 @@ class MARAOrb(QWidget):
         if self._state == "IDLE" and self._alpha == 0:
             return
 
-        # Rotation
+        
         self._rot_y += self._rot_speed()
 
-        # Pulses
+        
         for p in self._pulses:
             p.advance()
         self._pulses = [p for p in self._pulses if not p.done]
@@ -283,7 +276,7 @@ class MARAOrb(QWidget):
 
         self.update()
 
-    # ── Paint ─────────────────────────────────────────────────────────────────
+   
 
     def paintEvent(self, event):
         if self._state == "IDLE" and self._alpha == 0:
@@ -293,7 +286,7 @@ class MARAOrb(QWidget):
         p   = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
 
-        # ── Fond sphérique ────────────────────────────────────────────────────
+        
         bg = QRadialGradient(CX, CY, ORB_R + 8)
         c_in  = QColor(col["bg_inner"]); c_in.setAlpha(210)
         c_out = QColor(col["bg_outer"]); c_out.setAlpha(0)
@@ -307,19 +300,19 @@ class MARAOrb(QWidget):
             int((ORB_R + 8) * 2), int((ORB_R + 8) * 2)
         )
 
-        # Pré-calculer projections de tous les nœuds
+        
         projs = [self._project(n) for n in self._nodes]
 
-        # Trier par profondeur (arrière d'abord)
+        
         order = sorted(range(len(self._nodes)), key=lambda i: projs[i][2])
 
-        # ── Edges — arrière d'abord ───────────────────────────────────────────
+        
         for ei, ej, angle in self._edges:
             px1, py1, d1, _ = projs[ei]
             px2, py2, d2, _ = projs[ej]
             depth_avg = (d1 + d2) / 2
 
-            # Nœuds derrière la sphère → très discrets
+            
             if depth_avg < -0.1:
                 visibility = 0.12 + (depth_avg + 1) * 0.08
                 ec = QColor(col["edge_back"])
@@ -332,7 +325,7 @@ class MARAOrb(QWidget):
             p.setPen(pen)
             p.drawLine(int(px1), int(py1), int(px2), int(py2))
 
-        # ── Pulses ────────────────────────────────────────────────────────────
+        
         for pulse in self._pulses:
             px1, py1, d1, s1 = projs[pulse.a]
             px2, py2, d2, s2 = projs[pulse.b]
@@ -342,14 +335,14 @@ class MARAOrb(QWidget):
             depth = d1 + (d2 - d1) * t
             scale = s1 + (s2 - s1) * t
 
-            # Masquer les pulses derrière la sphère
+            
             if depth < -0.2:
                 continue
 
             vis = max(0.2, (depth + 1) / 2)
             sz  = pulse.size * scale * 0.9
 
-            # Glow
+            
             glow = QRadialGradient(x, y, sz * 3)
             gc = QColor(pulse.color); gc.setAlpha(int(90 * vis))
             tc = QColor(pulse.color); tc.setAlpha(0)
@@ -359,12 +352,12 @@ class MARAOrb(QWidget):
             p.setPen(Qt.NoPen)
             p.drawEllipse(int(x - sz*3), int(y - sz*3), int(sz*6), int(sz*6))
 
-            # Core
+           
             cc = QColor(pulse.color); cc.setAlpha(int(220 * vis))
             p.setBrush(QBrush(cc))
             p.drawEllipse(int(x - sz*0.7), int(y - sz*0.7), int(sz*1.4), int(sz*1.4))
 
-        # ── Nœuds — avant en dernier (par-dessus) ────────────────────────────
+        
         for i in order:
             n = self._nodes[i]
             px, py, depth, scale = projs[i]
@@ -377,7 +370,7 @@ class MARAOrb(QWidget):
             vis = 0.25 + ((depth + 1) / 2) * 0.75
             brightness = vis * (0.6 + pulse_val * 0.2)
 
-            # Glow
+            
             g = QRadialGradient(px, py, nr * 4)
             gc = QColor(nc); gc.setAlpha(int(70 * brightness))
             tc = QColor(nc); tc.setAlpha(0)
@@ -386,20 +379,20 @@ class MARAOrb(QWidget):
             p.setPen(Qt.NoPen)
             p.drawEllipse(int(px - nr*4), int(py - nr*4), int(nr*8), int(nr*8))
 
-            # Corps
+            
             fc = QColor(col["bg_inner"]); fc.setAlpha(180)
             border = QColor(nc); border.setAlpha(int(180 * brightness))
             p.setBrush(QBrush(fc))
             p.setPen(QPen(border, 0.7))
             p.drawEllipse(int(px - nr), int(py - nr), int(nr*2), int(nr*2))
 
-            # Point central
+            
             bright_c = QColor(nc); bright_c.setAlpha(int(210 * brightness))
             p.setBrush(QBrush(bright_c))
             p.setPen(Qt.NoPen)
             p.drawEllipse(int(px - nr*0.4), int(py - nr*0.4), int(nr*0.8), int(nr*0.8))
 
-        # ── Rim ───────────────────────────────────────────────────────────────
+        
         rim = QColor(col["rim"]); rim.setAlpha(25)
         p.setPen(QPen(rim, 1.0))
         p.setBrush(Qt.NoBrush)
@@ -408,7 +401,7 @@ class MARAOrb(QWidget):
             int((ORB_R + 6) * 2), int((ORB_R + 6) * 2)
         )
 
-        # Reflet subtil en haut à gauche
+        
         highlight = QRadialGradient(CX - ORB_R * 0.3, CY - ORB_R * 0.35, ORB_R * 0.55)
         hc = QColor(255, 255, 255); hc.setAlpha(12)
         ht = QColor(255, 255, 255); ht.setAlpha(0)

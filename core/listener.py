@@ -7,7 +7,7 @@ import scipy.io.wavfile as wav
 import whisper
 import keyboard
 
-# ─── Chargement Whisper en arrière-plan ───────────────────────────────────────
+
 print("Chargement de Whisper...")
 model = None
 _model_ready = threading.Event()
@@ -20,15 +20,15 @@ def _load_whisper():
 
 threading.Thread(target=_load_whisper, daemon=True).start()
 
-# ─── Paramètres audio ─────────────────────────────────────────────────────────
+
 SAMPLE_RATE    = 16000
 CHUNK_SIZE     = 512
-TRIGGER_KEY    = "f13"   # Bouton sniper G502 → F13 via G HUB
+TRIGGER_KEY    = "f13"   
 
-# ─── Lock Whisper — GPU ne peut pas transcrire en parallèle ──────────────────
+
 _whisper_lock = threading.Lock()
 
-# ─── Flag is_speaking — True quand MARA joue de l'audio via TTS ──────────────
+
 _is_speaking   = False
 _speaking_lock = threading.Lock()
 
@@ -46,9 +46,6 @@ def _get_is_speaking() -> bool:
         return _is_speaking
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# LISTENER PRINCIPAL
-# ══════════════════════════════════════════════════════════════════════════════
 
 def listen() -> str:
     """
@@ -59,10 +56,10 @@ def listen() -> str:
 
     print("Maintiens le bouton souris pour parler...")
 
-    # Attend que F13 soit pressé
+    
     keyboard.wait(TRIGGER_KEY, suppress=True)
 
-    # Skip si MARA parle
+    
     if _get_is_speaking():
         return ""
 

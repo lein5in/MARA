@@ -18,18 +18,18 @@ def main():
 
     text_queue = queue.Queue()
 
-    # ── Interface texte ───────────────────────────────────────────────────────
+     ── Interface texte ───────────────────────────────────────────────────────
     window = MARAWindow(text_queue)
     window.hide()
 
-    # ── Orbe neural ───────────────────────────────────────────────────────────
+     ── Orbe neural ───────────────────────────────────────────────────────────
     orb = MARAOrb()
-    # Pas de show() — l'orbe est invisible jusqu'au premier état actif
+     Pas de show() — l'orbe est invisible jusqu'au premier état actif
 
-    # ── Worker ────────────────────────────────────────────────────────────────
+     ── Worker ────────────────────────────────────────────────────────────────
     worker = MARAWorker(text_queue)
 
-    # Signaux → interface texte
+     Signaux → interface texte
     worker.sig_status.connect(window.on_status)
     worker.sig_stream_start.connect(window.on_mara_stream_start)
     worker.sig_chunk.connect(window.on_mara_chunk)
@@ -40,7 +40,7 @@ def main():
     worker.sig_hide.connect(window.hide)
     worker.sig_visual.connect(window.on_visual)
 
-    # Signaux → orbe
+     Signaux → orbe
     worker.sig_status.connect(orb.set_state)
 
     worker.start()

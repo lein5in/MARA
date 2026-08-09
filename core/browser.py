@@ -9,8 +9,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import TimeoutException, WebDriverException
 from memory.credentials import credentials
 
-# ─── Configurations des sites connus ─────────────────────────────────────────
-# Ajouter un site ici = MARA peut s'y connecter automatiquement
+
 SITE_CONFIGS = {
     "gmail": {
         "url": "https://mail.google.com",
@@ -51,7 +50,7 @@ BY_MAP = {
 }
 
 
-# ─── BrowserController ────────────────────────────────────────────────────────
+
 
 class BrowserController:
     """
@@ -69,7 +68,7 @@ class BrowserController:
             cls._instance = cls()
         return cls._instance
 
-    # ─── Driver management ────────────────────────────────────────────────────
+    
 
     def _get_driver(self) -> webdriver.Chrome:
         """Retourne le driver existant ou lance un nouveau Chrome MARA."""
@@ -82,7 +81,7 @@ class BrowserController:
 
         options = Options()
 
-        # Dossier de profil MARA totalement indépendant — jamais de conflit avec Chrome ouvert
+        
         mara_profile = Path(os.environ.get("LOCALAPPDATA", "")) / "MARA" / "ChromeProfile"
         mara_profile.mkdir(parents=True, exist_ok=True)
         options.add_argument(f"--user-data-dir={mara_profile}")
@@ -97,7 +96,7 @@ class BrowserController:
         print(f"[Browser] Chrome MARA lancé → profil : {mara_profile}")
         return self._driver
 
-    # ─── Actions de base ──────────────────────────────────────────────────────
+   
 
     def navigate(self, url: str) -> str:
         """Navigue vers une URL."""
@@ -151,11 +150,11 @@ class BrowserController:
         driver = self._get_driver()
         title = driver.title
 
-        # Essaie les conteneurs de contenu principal en priorité
+       
         main_selectors = [
             "main", "article", "#content", ".content",
             "#main-content", ".main-content", "#results",
-            "ytd-video-renderer", ".ytd-video-renderer",  # YouTube
+            "ytd-video-renderer", ".ytd-video-renderer",  
             "[role='main']",
         ]
 
@@ -174,7 +173,7 @@ class BrowserController:
             except Exception:
                 continue
 
-        # Fallback — body entier si rien trouvé
+        
         if not text:
             try:
                 body = driver.find_element(By.TAG_NAME, "body")
@@ -182,7 +181,7 @@ class BrowserController:
             except Exception:
                 text = ""
 
-        # Nettoie et tronque
+       
         lines = [l.strip() for l in text.splitlines() if l.strip()]
         clean = " | ".join(lines)[:max_chars]
 
@@ -198,7 +197,7 @@ class BrowserController:
             self._driver = None
         return "Navigateur fermé."
 
-    # ─── Login automatique ────────────────────────────────────────────────────
+    
 
     def login(self, site: str) -> str:
         """
@@ -236,7 +235,7 @@ class BrowserController:
 
         return f"Logged into {site}."
 
-    # ─── Gestion des credentials ──────────────────────────────────────────────
+    
 
     def save_credential(self, site: str, email: str, password: str) -> str:
         """Sauvegarde les identifiants dans mara_credentials.enc (Fernet AES)."""
@@ -253,5 +252,5 @@ class BrowserController:
         return credentials.delete(site)
 
 
-# ─── Singleton global ─────────────────────────────────────────────────────────
+
 browser = BrowserController.get_instance()

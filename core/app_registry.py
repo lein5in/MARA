@@ -5,48 +5,46 @@ from pathlib import Path
 
 REGISTRY_PATH = Path(__file__).parent.parent / "assets" / "app_registry.json"
 
-# ─── Blacklist — noms d'exe à ne jamais indexer ──────────────────────────────
+
 BLACKLIST_NAMES = {
     "store", "winget", "wt", "cmd", "powershell", "python", "pip", "git",
     "node", "npm", "py", "pyw",
 }
 
-# ─── Blacklist — sous-chemins à ignorer entièrement ──────────────────────────
-# Tout exe dont le path contient l'un de ces fragments est exclu
+
 BLACKLIST_PATH_FRAGMENTS = [
-    # Git internal tools (Unix ports) — on garde git-bash.exe, git-gui.exe etc. à la racine Git\
+    
     "\\Git\\usr\\",
     "\\Git\\mingw64\\",
     "\\Git\\mingw32\\",
-    # Android SDK CLI tools
+    
     "\\Android\\Sdk\\",
-    # Java JDK binaries
+    
     "\\jdk-",
     "\\jre-",
-    # Go build artifacts
+    
     "\\go-build\\",
-    # Cached installers
+    
     "\\Package Cache\\",
-    # Temp pip artifacts
+    
     "\\Temp\\pip-",
-    # LGHUB integrations (applets internes)
+    
     "\\LGHUB\\integrations\\",
-    # Office internal rules/markers
+    
     ".exe_Rules",
-    # Windows internal AppData markers
+    
     "\\Best_Buy_Canada_Ltd\\",
     "\\iMobie_Inc\\",
 ]
 
-# ─── Regex filtre — noms d'exe à exclure (appliqué sur le basename) ──────────
+
 BASENAME_FILTER = (
     "uninstall|setup|install|update|crash|helper|register|repair|"
     "installer|updater|patcher|cleanup|touchup|elevat|proxy|hook|"
     "surrogate|injector|broker|launcher_helper|_rules|errorreporter"
 )
 
-# ─── Apps connues à lancer via un chemin spécial (versioned folders) ─────────
-# Pour ces apps, on fait une recherche ciblée si le scan trouve un mauvais exe
+
 VERSIONED_APPS = {
     "discord": {
         "search_path": Path(os.environ.get("LOCALAPPDATA", "")) / "Discord",
@@ -62,7 +60,7 @@ VERSIONED_APPS = {
     },
 }
 
-# ─── Alias communs ────────────────────────────────────────────────────────────
+
 ALIASES = {
     "discord": ["discord", "discordapp"],
     "spotify": ["spotify"],
@@ -104,7 +102,7 @@ foreach ($path in $startMenuPaths) {
                 $shortcut = $shell.CreateShortcut($_.FullName)
                 $target = $shortcut.TargetPath
                 $targetBase = [System.IO.Path]::GetFileNameWithoutExtension($target).ToLower()
-                # Filtre sur le nom du raccourci ET sur le basename de la cible
+                
                 if ($target -and $target.EndsWith(".exe") -and (Test-Path $target)) {
                     if ($targetBase -notmatch "uninstall|setup|install|update|crash|helper|register|repair|installer|updater|patcher|cleanup|touchup|elevat|proxy|hook|surrogate|injector|broker|errorreporter") {
                         $apps += [PSCustomObject]@{
@@ -118,7 +116,7 @@ foreach ($path in $startMenuPaths) {
     }
 }
 
-# --- Program Files (GUI apps only — depth 3) ---
+
 $programPaths = @(
     "$env:ProgramFiles",
     "${env:ProgramFiles(x86)}",
@@ -129,7 +127,7 @@ foreach ($base in $programPaths) {
         Get-ChildItem -Path $base -Recurse -Filter "*.exe" -Depth 3 -ErrorAction SilentlyContinue | ForEach-Object {
             $name = $_.BaseName.ToLower()
             $fullPath = $_.FullName
-            # Exclure Git internals, Android SDK, JDK bin, etc.
+            
             if ($fullPath -notmatch "\\Git\\usr\\|\\Git\\mingw|\\Android\\Sdk\\|\\jdk-|\\jre-|\\go-build\\|\\Package Cache\\") {
                 if ($name -notmatch "uninstall|setup|install|update|crash|helper|register|repair|installer|updater|patcher|cleanup|touchup|elevat|proxy|hook|surrogate|injector|broker|errorreporter") {
                     $apps += [PSCustomObject]@{
@@ -142,7 +140,7 @@ foreach ($base in $programPaths) {
     }
 }
 
-# --- AppData Local (Discord, Spotify, etc. — depth 4) ---
+
 $localAppData = "$env:LOCALAPPDATA"
 Get-ChildItem -Path $localAppData -Filter "*.exe" -Recurse -Depth 4 -ErrorAction SilentlyContinue | ForEach-Object {
     $name = $_.BaseName.ToLower()
@@ -157,7 +155,7 @@ Get-ChildItem -Path $localAppData -Filter "*.exe" -Recurse -Depth 4 -ErrorAction
     }
 }
 
-# --- AppData Roaming (Zoom, Spotify, etc. — depth 3) ---
+
 $roaming = "$env:APPDATA"
 Get-ChildItem -Path $roaming -Filter "*.exe" -Recurse -Depth 3 -ErrorAction SilentlyContinue | ForEach-Object {
     $name = $_.BaseName.ToLower()
@@ -174,7 +172,7 @@ $apps | Select-Object -Unique name, path | ConvertTo-Json -Compress
 """
 
 
-# ─── Résolution des apps versionnées (Discord, Roblox, etc.) ─────────────────
+
 
 def _resolve_versioned(name: str, found_path: str) -> str:
     """
@@ -188,7 +186,7 @@ def _resolve_versioned(name: str, found_path: str) -> str:
     if not is_bad:
         return found_path
 
-    # Cherche dans VERSIONED_APPS
+  
     for key, info in VERSIONED_APPS.items():
         if key in name or name in key:
             search_path = info["search_path"]
@@ -196,28 +194,28 @@ def _resolve_versioned(name: str, found_path: str) -> str:
             if search_path.exists():
                 matches = sorted(search_path.glob(pattern))
                 if matches:
-                    # Prend la version la plus récente (tri alphabétique sur app-X.X.XXXX)
+                    
                     return str(matches[-1])
 
-    # Fallback générique — cherche un exe du même nom dans le dossier parent
+    
     parent = Path(found_path).parent
-    target_name = name.split()[0]  # ex: "discord" depuis "discord"
+    target_name = name.split()[0]  
     candidates = list(parent.glob(f"**/{target_name}.exe"))
     if candidates:
         return str(candidates[0])
 
-    return found_path  # Rien trouvé — on retourne l'original
+    return found_path  
 
 
-# ─── Filtre Python (2ème couche après PowerShell) ────────────────────────────
+
 
 def _is_valid_entry(name: str, path: str) -> bool:
     """Vérifie qu'une entrée nom/path est valide avant indexation."""
-    # Nom blacklisté
+    
     if name in BLACKLIST_NAMES:
         return False
 
-    # Fragment de chemin blacklisté
+    
     path_lower = path.lower()
     for fragment in BLACKLIST_PATH_FRAGMENTS:
         if fragment.lower() in path_lower:
@@ -226,7 +224,7 @@ def _is_valid_entry(name: str, path: str) -> bool:
     return True
 
 
-# ─── Scanner ──────────────────────────────────────────────────────────────────
+
 
 def build_registry() -> dict:
     """Lance le scan PowerShell et construit le registre propre des apps."""
@@ -248,7 +246,7 @@ def build_registry() -> dict:
         if isinstance(apps_list, dict):
             apps_list = [apps_list]
 
-        # Construire le registre name → path (premier match gagne)
+        
         registry = {}
         skipped = 0
         for app in apps_list:
@@ -265,12 +263,12 @@ def build_registry() -> dict:
                 skipped += 1
                 continue
 
-            # Résolution des apps versionnées (Update.exe → vrai exe)
+            
             path = _resolve_versioned(name, path)
 
             registry[name] = path
 
-        # Sauvegarder
+       
         REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
         with open(REGISTRY_PATH, "w", encoding="utf-8") as f:
             json.dump(registry, f, indent=2, ensure_ascii=False)
@@ -301,7 +299,7 @@ def get_registry(rebuild: bool = False) -> dict:
     return load_registry()
 
 
-# ─── Lookup ───────────────────────────────────────────────────────────────────
+
 
 def find_app(name: str, registry: dict) -> str | None:
     """
@@ -311,23 +309,23 @@ def find_app(name: str, registry: dict) -> str | None:
     """
     name = name.lower().strip()
 
-    # 1. Match exact
+    
     if name in registry:
         return registry[name]
 
-    # 2. Alias connus
+    
     for canonical, aliases in ALIASES.items():
         if name in aliases or name == canonical:
             for alias in aliases:
                 if alias in registry:
                     return registry[alias]
 
-    # 3. Fuzzy — cherche si le nom est contenu dans une clé du registre
+    
     for key, path in registry.items():
         if name in key or key in name:
             return path
 
-    # 4. Fuzzy inverse — cherche dans le nom du fichier exe
+    
     for key, path in registry.items():
         exe_name = Path(path).stem.lower()
         if name in exe_name or exe_name in name:

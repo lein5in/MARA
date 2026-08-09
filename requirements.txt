@@ -1,37 +1,37 @@
-# Horloge
+ Horloge
 tzdata
 
-# Speech-to-Text
+ Speech-to-Text
 openai-whisper
 
-# Audio
+ Audio
 pyaudio
 sounddevice
 numpy
 
-# Cerveau IA
+ Cerveau IA
 anthropic
 
-# Recherche fichiers indexée
+ Recherche fichiers indexée
 pywin32
 pyperclip
 
-# Contrôle système
+ Contrôle système
 pyautogui
 pycaw
 psutil
 
-# Navigateur
+ Navigateur
 selenium
 
-# Interface visuelle
+ Interface visuelle
 pyqt5
 
-# Clavier (touche trigger)
+ Clavier (touche trigger)
 keyboard
 
-# Mémoire chiffrée
+ Mémoire chiffrée
 cryptography
 
-# Variables d'environnement
+ Variables d'environnement
 python-dotenv
