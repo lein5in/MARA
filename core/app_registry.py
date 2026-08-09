@@ -88,11 +88,10 @@ ALIASES = {
     "msi center": ["msi.centralserver", "msigeneralcontrol"],
 }
 
-# ─── PowerShell script ────────────────────────────────────────────────────────
 PS_WIN32 = r"""
 $apps = @()
 
-# --- Start Menu shortcuts ---
+
 $startMenuPaths = @(
     "$env:APPDATA\Microsoft\Windows\Start Menu\Programs",
     "$env:ProgramData\Microsoft\Windows\Start Menu\Programs"

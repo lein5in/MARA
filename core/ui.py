@@ -18,19 +18,18 @@ from core.brain import _build_system_prompt
 
 READ_ACTIONS = {"browser_read", "get_volume", "get_brightness", "wifi_status", "get_time"}
 
-BG_MAIN      = "#14111d"
-BG_MSG_MARA  = "#211d2e"
-BG_MSG_YOU   = "#6c4fe0"
-ACCENT       = "#8a6cf0"
-ACCENT_DIM   = "#5d4bb0"
-ACCENT_GRAD_A = "#8a6cf0"
-ACCENT_GRAD_B = "#5433c9"
-TEXT_PRIMARY = "#eae7f5"
-TEXT_SEC     = "#9d97b8"
-TEXT_DIM     = "#4a4560"
-TEXT_YOU     = "#f0eefc"
-BORDER       = "#221e30"
-BORDER_LIGHT = "#2c273c"
+BG_MAIN      = "#ffffff"
+BG_MSG_MARA  = "#f3f3f3"
+BG_MSG_YOU   = "#1a1a1a"
+ACCENT       = "#1a1a1a"
+ACCENT_DIM   = "#3a3a3a"
+TEXT_PRIMARY = "#1a1a1a"
+TEXT_SEC     = "#8a8a8a"
+TEXT_DIM     = "#b5b5b5"
+TEXT_YOU     = "#ffffff"
+BORDER       = "#e6e6e6"
+BORDER_LIGHT = "#dcdcdc"
+PILL_BG      = "#f3f3f3"
 
 WIN_W = 680
 WIN_H = 700
@@ -61,51 +60,38 @@ QLineEdit {{
 
 INPUT_CONTAINER_STYLE = f"""
 QWidget {{
-    background: #1c1829;
+    background: {PILL_BG};
     border: 1px solid {BORDER_LIGHT};
     border-radius: 24px;
 }}
 """
 
 def _brand_avatar(size: int = 32, font_size: int = 14) -> QLabel:
+    """Avatar plein — noir/gris foncé, lettre blanche. Utilisé dans le header fixe."""
     lbl = QLabel("M")
     lbl.setFixedSize(size, size)
     lbl.setAlignment(Qt.AlignCenter)
     lbl.setFont(_font(font_size, bold=True))
     lbl.setStyleSheet(f"""
-        background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {ACCENT_GRAD_A}, stop:1 {ACCENT_GRAD_B});
+        background: #1a1a1a;
         border-radius: {size // 2}px;
         color: white;
     """)
     return lbl
 
-def _build_brand_header() -> QWidget:
-    wrap = QWidget()
-    lay = QVBoxLayout(wrap)
-    lay.setContentsMargins(0, 36, 0, 28)
-    lay.setSpacing(10)
-    lay.setAlignment(Qt.AlignCenter)
-
-    logo = _brand_avatar(72, 30)
-    logo_row = QHBoxLayout()
-    logo_row.addStretch()
-    logo_row.addWidget(logo)
-    logo_row.addStretch()
-    lay.addLayout(logo_row)
-
-    title = QLabel("MARA")
-    title.setAlignment(Qt.AlignCenter)
-    title.setFont(_font(20, bold=True))
-    title.setStyleSheet(f"color: {TEXT_PRIMARY}; letter-spacing: 4px;")
-    lay.addWidget(title)
-
-    subtitle = QLabel("Your voice AI")
-    subtitle.setAlignment(Qt.AlignCenter)
-    subtitle.setFont(_font(11))
-    subtitle.setStyleSheet(f"color: {TEXT_SEC}; letter-spacing: 1px;")
-    lay.addWidget(subtitle)
-
-    return wrap
+def _outline_avatar(size: int = 22, font_size: int = 10) -> QLabel:
+    """Avatar contour — cercle vide, sans remplissage. Utilisé sur les bulles MARA."""
+    lbl = QLabel("M")
+    lbl.setFixedSize(size, size)
+    lbl.setAlignment(Qt.AlignCenter)
+    lbl.setFont(_font(font_size, bold=True))
+    lbl.setStyleSheet(f"""
+        background: transparent;
+        border: 1px solid {TEXT_PRIMARY};
+        border-radius: {size // 2}px;
+        color: {TEXT_PRIMARY};
+    """)
+    return lbl
 
 class StatusDot(QWidget):
     def __init__(self, parent=None):
@@ -239,15 +225,24 @@ class MessageBubble(QWidget):
         row.setSpacing(10)
 
         if is_mara:
-            row.addWidget(_brand_avatar(28, 12), alignment=Qt.AlignTop)
+            row.addWidget(_outline_avatar(22, 10), alignment=Qt.AlignTop)
         else:
             row.addStretch()
 
         bubble = QWidget()
         bubble.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         bubble.setMaximumWidth(440)
-        bg = BG_MSG_MARA if is_mara else BG_MSG_YOU
-        bubble.setStyleSheet(f"background: {bg}; border-radius: 16px;")
+        if is_mara:
+            bubble.setStyleSheet(f"""
+                background: {BG_MSG_MARA};
+                border: 1px solid {BORDER};
+                border-radius: 12px;
+            """)
+        else:
+            bubble.setStyleSheet(f"""
+                background: {BG_MSG_YOU};
+                border-radius: 12px;
+            """)
 
         blay = QVBoxLayout(bubble)
         blay.setContentsMargins(16, 12, 16, 12)
@@ -345,37 +340,45 @@ class MARAWindow(QWidget):
 
     def _build_topbar(self) -> QWidget:
         bar = QWidget()
-        bar.setFixedHeight(54)
+        bar.setFixedHeight(60)
         bar.setStyleSheet(f"background: {BG_MAIN};")
         lay = QHBoxLayout(bar)
-        lay.setContentsMargins(20, 0, 16, 0)
-        lay.setSpacing(10)
+        lay.setContentsMargins(18, 0, 16, 0)
+        lay.setSpacing(12)
 
-        menu_btn = QPushButton("☰")
-        menu_btn.setFixedSize(30, 30)
-        menu_btn.setFont(_font(14))
-        menu_btn.setStyleSheet(self._icon_btn_style())
-        menu_btn.clicked.connect(self.toggle_fullscreen)
-        lay.addWidget(menu_btn)
+        lay.addWidget(_brand_avatar(32, 13))
+
+        text_col = QVBoxLayout()
+        text_col.setSpacing(1)
+        text_col.setContentsMargins(0, 0, 0, 0)
+
+        title_row = QHBoxLayout()
+        title_row.setSpacing(6)
+        title = QLabel("MARA")
+        title.setFont(_font(14, bold=True))
+        title.setStyleSheet(f"color: {TEXT_PRIMARY};")
+        title_row.addWidget(title)
 
         self._dot = StatusDot()
-        lay.addWidget(self._dot)
+        title_row.addWidget(self._dot, alignment=Qt.AlignVCenter)
+        title_row.addStretch()
+        text_col.addLayout(title_row)
+
+        subtitle = QLabel("Local voice assistant")
+        subtitle.setFont(_font(11))
+        subtitle.setStyleSheet(f"color: {TEXT_SEC};")
+        text_col.addWidget(subtitle)
+
+        lay.addLayout(text_col)
 
         lay.addStretch()
 
-        self._vision_btn = QPushButton("👁")
-        self._vision_btn.setFixedSize(30, 30)
-        self._vision_btn.setFont(_font(13))
-        self._vision_btn.setStyleSheet(self._icon_btn_style())
-        self._vision_btn.clicked.connect(lambda: self._set_mode("VISION"))
-        lay.addWidget(self._vision_btn)
-
-        self._mute_btn = QPushButton("🔊")
-        self._mute_btn.setFixedSize(30, 30)
-        self._mute_btn.setFont(_font(13))
-        self._mute_btn.setStyleSheet(self._icon_btn_style())
-        self._mute_btn.clicked.connect(lambda: self._set_mode("SILENT"))
-        lay.addWidget(self._mute_btn)
+        expand_btn = QPushButton("⤢")
+        expand_btn.setFixedSize(30, 30)
+        expand_btn.setFont(_font(13))
+        expand_btn.setStyleSheet(self._icon_btn_style())
+        expand_btn.clicked.connect(self.toggle_fullscreen)
+        lay.addWidget(expand_btn)
 
         close_btn = QPushButton("−")
         close_btn.setFixedSize(30, 30)
@@ -390,9 +393,8 @@ class MARAWindow(QWidget):
         self._log_inner = QWidget()
         self._log_inner.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         self._log_layout = QVBoxLayout(self._log_inner)
-        self._log_layout.setContentsMargins(0, 0, 0, 0)
+        self._log_layout.setContentsMargins(0, 12, 0, 0)
         self._log_layout.setSpacing(1)
-        self._log_layout.addWidget(_build_brand_header())
         self._log_layout.addStretch()
 
         self._scroll = QScrollArea()
@@ -415,10 +417,10 @@ class MARAWindow(QWidget):
         ilay.setContentsMargins(18, 0, 8, 0)
         ilay.setSpacing(10)
 
-        clip_lbl = QLabel("📎")
-        clip_lbl.setFont(_font(13))
-        clip_lbl.setStyleSheet(f"color: {TEXT_DIM}; background: transparent;")
-        ilay.addWidget(clip_lbl)
+        mic_lbl = QLabel("🎙")
+        mic_lbl.setFont(_font(13))
+        mic_lbl.setStyleSheet(f"color: {TEXT_SEC}; background: transparent;")
+        ilay.addWidget(mic_lbl)
 
         self._input = QLineEdit()
         self._input.setPlaceholderText("Type your message...")
@@ -432,12 +434,12 @@ class MARAWindow(QWidget):
         send_btn.setFont(_font(15, bold=True))
         send_btn.setStyleSheet(f"""
             QPushButton {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {ACCENT_GRAD_A}, stop:1 {ACCENT_GRAD_B});
+                background: #1a1a1a;
                 border: none; color: white;
                 border-radius: 18px;
             }}
-            QPushButton:hover {{ background: {ACCENT}; }}
-            QPushButton:pressed {{ background: {ACCENT_DIM}; }}
+            QPushButton:hover {{ background: #333333; }}
+            QPushButton:pressed {{ background: #000000; }}
         """)
         send_btn.clicked.connect(self._send)
         ilay.addWidget(send_btn)
@@ -445,11 +447,12 @@ class MARAWindow(QWidget):
         wlay.addWidget(input_container)
 
         mode_row = QHBoxLayout()
-        mode_row.setSpacing(8)
-        mode_row.setContentsMargins(4, 0, 4, 0)
+        mode_row.setSpacing(10)
+        mode_row.setContentsMargins(4, 2, 4, 0)
         mode_row.addStretch()
 
         self._mode_btns: dict[str, QPushButton] = {}
+
         silent_btn = QPushButton("🔇  Silent mode")
         silent_btn.setFont(_font(10))
         silent_btn.setFixedHeight(26)
@@ -457,6 +460,20 @@ class MARAWindow(QWidget):
         silent_btn.clicked.connect(lambda: self._set_mode("SILENT"))
         self._mode_btns["SILENT"] = silent_btn
         mode_row.addWidget(silent_btn)
+
+        mode_divider = QFrame()
+        mode_divider.setFixedWidth(1)
+        mode_divider.setFixedHeight(16)
+        mode_divider.setStyleSheet(f"background: {BORDER_LIGHT};")
+        mode_row.addWidget(mode_divider)
+
+        vision_btn = QPushButton("👁  Vision mode")
+        vision_btn.setFont(_font(10))
+        vision_btn.setFixedHeight(26)
+        vision_btn.setStyleSheet(self._mode_btn_style(False))
+        vision_btn.clicked.connect(lambda: self._set_mode("VISION"))
+        self._mode_btns["VISION"] = vision_btn
+        mode_row.addWidget(vision_btn)
 
         mode_row.addStretch()
         wlay.addLayout(mode_row)
@@ -470,21 +487,21 @@ class MARAWindow(QWidget):
         return f
 
     def _icon_btn_style(self, active: bool = False) -> str:
-        color = ACCENT if active else TEXT_DIM
+        color = TEXT_PRIMARY if active else TEXT_SEC
         return f"""
             QPushButton {{
                 background: transparent; border: none;
                 color: {color}; border-radius: 4px; font-size: 15px;
             }}
-            QPushButton:hover {{ color: {TEXT_SEC}; background: #221e30; }}
+            QPushButton:hover {{ color: {TEXT_PRIMARY}; background: {BG_MSG_MARA}; }}
         """
 
     def _mode_btn_style(self, active: bool) -> str:
         if active:
             return f"""
                 QPushButton {{
-                    background: #2a2340; border: 1px solid {ACCENT_DIM};
-                    color: {ACCENT}; border-radius: 13px; padding: 4px 14px;
+                    background: {BG_MSG_MARA}; border: 1px solid {BORDER_LIGHT};
+                    color: {TEXT_PRIMARY}; border-radius: 13px; padding: 4px 14px;
                     font-family: 'Segoe UI'; font-size: 10px; letter-spacing: 1px;
                 }}
             """
@@ -503,9 +520,7 @@ class MARAWindow(QWidget):
         active_vision = self._mode == "VISION"
 
         self._mode_btns["SILENT"].setStyleSheet(self._mode_btn_style(active_silent))
-        self._mute_btn.setText("🔇" if active_silent else "🔊")
-        self._mute_btn.setStyleSheet(self._icon_btn_style(active_silent))
-        self._vision_btn.setStyleSheet(self._icon_btn_style(active_vision))
+        self._mode_btns["VISION"].setStyleSheet(self._mode_btn_style(active_vision))
 
     def _send(self):
         text = self._input.text().strip()
@@ -535,12 +550,12 @@ class MARAWindow(QWidget):
 
     def on_status(self, status: str):
         colors = {
-            "THINKING":    "#8888ff",
-            "SPEAKING":    "#88cc88",
-            "LISTENING":   "#ccaa44",
-            "PAUSED":      "#666666",
-            "OPERATIONAL": "#505050",
-            "IDLE":        "#383838",
+            "THINKING":    "#4a4a4a",
+            "SPEAKING":    "#1a1a1a",
+            "LISTENING":   "#6b6b6b",
+            "PAUSED":      "#b5b5b5",
+            "OPERATIONAL": "#9a9a9a",
+            "IDLE":        "#d0d0d0",
         }
         self._dot.set_color(colors.get(status, "#505050"))
 
