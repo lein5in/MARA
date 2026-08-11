@@ -18,18 +18,18 @@ from core.brain import _build_system_prompt
 
 READ_ACTIONS = {"browser_read", "get_volume", "get_brightness", "wifi_status", "get_time"}
 
-BG_MAIN      = "#ffffff"
-BG_MSG_MARA  = "#f3f3f3"
-BG_MSG_YOU   = "#1a1a1a"
-ACCENT       = "#1a1a1a"
-ACCENT_DIM   = "#3a3a3a"
-TEXT_PRIMARY = "#1a1a1a"
-TEXT_SEC     = "#8a8a8a"
-TEXT_DIM     = "#b5b5b5"
+BG_MAIN      = "#1c1c1e"
+BG_MSG_MARA  = "#2b2b2e"
+BG_MSG_YOU   = "#000000"
+ACCENT       = "#f2f2f2"
+ACCENT_DIM   = "#3a3a3d"
+TEXT_PRIMARY = "#f2f2f2"
+TEXT_SEC     = "#9a9a9a"
+TEXT_DIM     = "#6b6b6e"
 TEXT_YOU     = "#ffffff"
-BORDER       = "#e6e6e6"
-BORDER_LIGHT = "#dcdcdc"
-PILL_BG      = "#f3f3f3"
+BORDER       = "#3a3a3d"
+BORDER_LIGHT = "#454548"
+PILL_BG      = "#2b2b2e"
 
 WIN_W = 680
 WIN_H = 700
@@ -73,7 +73,8 @@ def _brand_avatar(size: int = 32, font_size: int = 14) -> QLabel:
     lbl.setAlignment(Qt.AlignCenter)
     lbl.setFont(_font(font_size, bold=True))
     lbl.setStyleSheet(f"""
-        background: #1a1a1a;
+        background: #000000;
+        border: 1px solid {BORDER_LIGHT};
         border-radius: {size // 2}px;
         color: white;
     """)
@@ -417,11 +418,6 @@ class MARAWindow(QWidget):
         ilay.setContentsMargins(18, 0, 8, 0)
         ilay.setSpacing(10)
 
-        mic_lbl = QLabel("🎙")
-        mic_lbl.setFont(_font(13))
-        mic_lbl.setStyleSheet(f"color: {TEXT_SEC}; background: transparent;")
-        ilay.addWidget(mic_lbl)
-
         self._input = QLineEdit()
         self._input.setPlaceholderText("Type your message...")
         self._input.setFont(_font(14))
@@ -434,7 +430,7 @@ class MARAWindow(QWidget):
         send_btn.setFont(_font(15, bold=True))
         send_btn.setStyleSheet(f"""
             QPushButton {{
-                background: #1a1a1a;
+                background: #000000;
                 border: none; color: white;
                 border-radius: 18px;
             }}
@@ -550,12 +546,12 @@ class MARAWindow(QWidget):
 
     def on_status(self, status: str):
         colors = {
-            "THINKING":    "#4a4a4a",
-            "SPEAKING":    "#1a1a1a",
-            "LISTENING":   "#6b6b6b",
-            "PAUSED":      "#b5b5b5",
-            "OPERATIONAL": "#9a9a9a",
-            "IDLE":        "#d0d0d0",
+            "THINKING":    "#c5c5c5",
+            "SPEAKING":    "#f2f2f2",
+            "LISTENING":   "#9a9a9a",
+            "PAUSED":      "#5a5a5a",
+            "OPERATIONAL": "#6b6b6b",
+            "IDLE":        "#3a3a3d",
         }
         self._dot.set_color(colors.get(status, "#505050"))
 
