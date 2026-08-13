@@ -1,7 +1,6 @@
 import os
 import re
 import json
-import queue as _queue
 import threading
 from anthropic import Anthropic
 from dotenv import load_dotenv
@@ -53,6 +52,9 @@ FORMAT
 Reply ONLY in natural text — zero markdown, zero emoji, zero stylistic capitals.
 1 to 2 sentences maximum unless {USER_NAME} explicitly asks for more.
 Language: always the language {USER_NAME} used in their last message.
+
+TOOLS
+You have tools available for things that change what you're doing entirely — showing a visual, looking at the screen, touching memory, resetting the conversation, work mode, or the interface window. Use a tool only when the user is clearly asking for that specific thing, based on the full conversation, not just surface keywords. A request to summarize or recap the conversation in words is NOT a request for a visual — only call generate_visual when the user explicitly wants to see something rendered (a chart, diagram, schema, or table). If you do call a tool, call it immediately with no text before it.
 
 SYSTEM ACTIONS
 ONLY if a system action is necessary, return ONLY this raw JSON (nothing else, no markdown):
@@ -148,41 +150,102 @@ Rules:
 - Do not memorize questions, commands, or general conversation.
 - Always reformulate the info in the third person."""
 
-INTENT_PROMPT = """You are an intent classifier for a personal vocal assistant.
+LANGUAGE_PROMPT = """Detect the language of the user's message. Reply with exactly one word, nothing else: fr, en, or ar."""
 
-Analyze the message and return the intent from these categories:
-- "visual_output" → the user asks for a graph, chart, diagram, schema, table, structured summary, or any visual representation of data or information
-- "memory_query"  → the user EXPLICITLY asks to see what MARA knows/has memorized about them
-- "memory_add"    → the user wants to force MARA to memorize something explicitly
-- "memory_forget" → the user wants to erase the last memorized info
-- "memory_reset"  → the user wants to erase ALL memory
-- "session_reset" → the user wants to clear the current conversation history
-                    (e.g. "reset the conversation", "clear our conversation", "new session",
-                    "clear chat", "start over", "forget what we just said")
-- "work_mode"     → the user wants to activate work mode
-- "vision_mode"   → the user wants MARA to look at the screen and describe or analyze it
-                    (e.g. "look at my screen", "what do you see", "vision mode",
-                    "what's on my screen", "describe my screen", "analyze my screen",
-                    "can you see this", "tell me what's open", "regarde mon écran",
-                    "qu'est-ce que tu vois", "décris mon écran")
-- "vision_code"   → the user wants MARA to look at CODE visible on the screen and review it,
-                    find a bug, explain an error, or suggest a fix
-                    (e.g. "look at my code", "find the bug on my screen", "what's wrong with this code",
-                    "review this function", "why is this crashing", "fix my code",
-                    "regarde mon code", "trouve le bug", "corrige mon code")
-- "ui_show"       → the user wants to display/open MARA's visual interface
-                    (e.g. "show interface", "open your window", "show yourself",
-                    "open the interface", "display the interface", "where are you",
-                    "show your face", "affiche toi", "affiche l'interface")
-- "ui_hide"       → the user wants to close/hide the visual interface
-                    (e.g. "hide", "close interface", "hide yourself",
-                    "close your window", "minimize", "go away visually",
-                    "cache toi", "ferme l'interface")
-- "normal"        → any other message
-
-Reply ONLY with this JSON, with no surrounding text:
-{"intent": "memory_query|memory_add|memory_forget|memory_reset|session_reset|work_mode|vision_mode|vision_code|visual_output|ui_show|ui_hide|normal", "content": "the info to memorize if intent=memory_add, the question asked about the screen if intent=vision_mode or vision_code, the visual request if intent=visual_output, otherwise null", "language": "fr|en|ar"}
-"""
+TOOLS = [
+    {
+        "name": "generate_visual",
+        "description": (
+            "Generate a visual — a chart, diagram, schema, or table — rendered in a separate window. "
+            "Use ONLY when the user explicitly wants to SEE something rendered visually. "
+            "Do NOT use this for a spoken or text summary/recap of the conversation — answer those in plain text instead."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": "Clear description of the visual to generate, based on the full conversation if needed."
+                }
+            },
+            "required": ["prompt"]
+        }
+    },
+    {
+        "name": "enter_vision_mode",
+        "description": "Look at the user's screen and describe or analyze what's currently displayed.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "question": {"type": "string", "description": "What the user wants to know about the screen."}
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "review_code_on_screen",
+        "description": "Look at code visible on the user's screen to find a bug, explain an error, or suggest a fix.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "question": {"type": "string", "description": "What the user wants reviewed or fixed."}
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "recall_memory",
+        "description": "Answer a question about what MARA has memorized about the user. Use ONLY when the user explicitly asks what MARA knows or remembers about them.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "question": {"type": "string", "description": "The question the user asked."}
+            },
+            "required": ["question"]
+        }
+    },
+    {
+        "name": "remember_fact",
+        "description": "Force-save a specific piece of information the user explicitly asks MARA to remember.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "fact": {"type": "string", "description": "The info to memorize, reformulated in the third person."}
+            },
+            "required": ["fact"]
+        }
+    },
+    {
+        "name": "forget_last_fact",
+        "description": "Erase the most recently memorized fact. Use only when the user explicitly asks to forget the last thing memorized.",
+        "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "reset_memory",
+        "description": "Erase ALL memorized facts, preferences and context about the user. Use only when the user explicitly asks to fully reset MARA's memory.",
+        "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "reset_conversation",
+        "description": "Clear the current conversation history, not long-term memory. Use when the user wants to start a fresh conversation.",
+        "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "enter_work_mode",
+        "description": "Activate work mode — opens VS Code, Chrome and Edge for a work session.",
+        "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "show_interface",
+        "description": "Show or open MARA's visual chat interface window.",
+        "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "hide_interface",
+        "description": "Hide or close MARA's visual chat interface window.",
+        "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+]
 
 WORK_MODE_ASK = {
     "fr": "Work mode on. What folder do you want to open in VS Code?",
@@ -202,20 +265,19 @@ WORK_MODE_NO_FILE = {
     "ar": "No file — launching VS Code, Chrome and Edge.",
 }
 
-def _classify_intent(user_input: str) -> dict:
+def _detect_language(user_input: str) -> str:
     try:
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=60,
-            system=INTENT_PROMPT,
+            max_tokens=5,
+            system=LANGUAGE_PROMPT,
             messages=[{"role": "user", "content": user_input}]
         )
-        raw = response.content[0].text.strip()
-        raw = raw.replace("```json", "").replace("```", "").strip()
-        return json.loads(raw)
+        lang = response.content[0].text.strip().lower()
+        return lang if lang in ("fr", "en", "ar") else "en"
     except Exception as e:
-        print(f"[Intent] Classification failed: {e}")
-        return {"intent": "normal", "content": None, "language": "en"}
+        print(f"[Language] Detection failed: {e}")
+        return "en"
 
 def _extract_and_save(user_input: str, language: str = "en"):
     try:
@@ -352,103 +414,100 @@ def get_work_mode_launch(language: str, has_file: bool) -> str:
         return WORK_MODE_LAUNCH.get(language, WORK_MODE_LAUNCH["en"])
     return WORK_MODE_NO_FILE.get(language, WORK_MODE_NO_FILE["en"])
 
-_STREAM_DONE = object()
+_MEMORY_TOOL_INTENTS = {
+    "recall_memory":      "memory_query",
+    "remember_fact":      "memory_add",
+    "forget_last_fact":   "memory_forget",
+    "reset_memory":       "memory_reset",
+    "reset_conversation": "session_reset",
+}
 
 def ask_mara_stream(user_input: str):
-    sonnet_q = _queue.Queue()
-    cancel_event = threading.Event()
 
-    def _run_sonnet():
-        try:
+    lang_result: dict = {}
 
-            msgs = conversation_history[-MAX_HISTORY:] + [
-                {"role": "user", "content": user_input}
-            ]
-            with client.messages.stream(
-                model="claude-sonnet-4-6",
-                max_tokens=1024,
-                system=_build_system_prompt(),
-                messages=msgs
-            ) as stream:
-                for text in stream.text_stream:
-                    if cancel_event.is_set():
-                        break
-                    sonnet_q.put(text)
-        except Exception as e:
-            print(f"[Sonnet] Stream error: {e}")
-        finally:
-            sonnet_q.put(_STREAM_DONE)
+    def _run_lang():
+        lang_result["lang"] = _detect_language(user_input)
 
-    sonnet_thread = threading.Thread(target=_run_sonnet, daemon=True)
-    sonnet_thread.start()
+    lang_thread = threading.Thread(target=_run_lang, daemon=True)
+    lang_thread.start()
 
-    intent_result = _classify_intent(user_input)
+    msgs = conversation_history[-MAX_HISTORY:] + [
+        {"role": "user", "content": user_input}
+    ]
 
-    intent   = intent_result.get("intent", "normal")
-    content  = intent_result.get("content")
-    language = intent_result.get("language", "en")
+    full_response = ""
+    final_message = None
 
-    print(f"[Intent] {intent} [{language}]")
-    system.set_current_lang(language)
-
-    if intent == "visual_output" :
-        cancel_event.set()
-        prompt = content or user_input
-        yield f"__VISUAL__{prompt}"
+    try:
+        with client.messages.stream(
+            model="claude-sonnet-5",
+            max_tokens=1024,
+            system=_build_system_prompt(),
+            tools=TOOLS,
+            messages=msgs
+        ) as stream:
+            for text in stream.text_stream:
+                full_response += text
+                yield text
+            final_message = stream.get_final_message()
+    except Exception as e:
+        print(f"[Sonnet] Stream error: {e}")
+        lang_thread.join()
         return
 
-    if intent == "work_mode":
-        cancel_event.set()
+    lang_thread.join()
+    language = lang_result.get("lang", "en")
+    system.set_current_lang(language)
+
+    tool_call = next((b for b in final_message.content if b.type == "tool_use"), None)
+
+    if tool_call is None:
+        conversation_history.append({"role": "user", "content": user_input})
+        conversation_history.append({"role": "assistant", "content": full_response})
+        if len(conversation_history) > MAX_HISTORY:
+            conversation_history[:] = conversation_history[-MAX_HISTORY:]
+
+        threading.Thread(
+            target=_extract_and_save,
+            args=(user_input, language),
+            daemon=True
+        ).start()
+        return
+
+    name = tool_call.name
+    args = tool_call.input or {}
+    print(f"[Tool] {name}")
+
+    if name == "generate_visual":
+        yield f"__VISUAL__{args.get('prompt', user_input)}"
+        return
+
+    if name == "enter_vision_mode":
+        yield f"__VISION__{args.get('question', user_input)}"
+        return
+
+    if name == "review_code_on_screen":
+        yield f"__VISION_CODE__{args.get('question', user_input)}"
+        return
+
+    if name == "enter_work_mode":
         yield f"__WORK_MODE__{language}"
         return
 
-    if intent == "vision_mode":
-        cancel_event.set()
-        prompt = content or user_input
-        yield f"__VISION__{prompt}"
-        return
-
-    if intent == "vision_code":
-        cancel_event.set()
-        prompt = content or user_input
-        yield f"__VISION_CODE__{prompt}"
-        return
-
-    if intent == "ui_show":
-        cancel_event.set()
+    if name == "show_interface":
         yield f"__UI_SHOW__{language}"
         return
 
-    if intent == "ui_hide":
-        cancel_event.set()
+    if name == "hide_interface":
         yield f"__UI_HIDE__{language}"
         return
 
-    if intent != "normal":
-        cancel_event.set()
-        response_text = handle_memory_command(intent, content, language, user_input)
-        yield response_text
+    intent = _MEMORY_TOOL_INTENTS.get(name)
+    if intent:
+        content = args.get("fact") or args.get("question")
+        yield handle_memory_command(intent, content, language, user_input)
         return
-
-    conversation_history.append({"role": "user", "content": user_input})
-
-    full_response = ""
-    while True:
-        chunk = sonnet_q.get()
-        if chunk is _STREAM_DONE:
-            break
-        full_response += chunk
-        yield chunk
-
-    conversation_history.append({"role": "assistant", "content": full_response})
-    if len(conversation_history) > MAX_HISTORY:
-        conversation_history[:] = conversation_history[-MAX_HISTORY:]
-
-    threading.Thread(
-        target=_extract_and_save,
-        args=(user_input, language),
-        daemon=True
-    ).start()
 
 def clear_session():
     global conversation_history
@@ -465,7 +524,7 @@ def ask_mara_vision_stream(prompt: str, img_b64: str):
     full_response = ""
     try:
         with client.messages.stream(
-            model="claude-sonnet-4-6",
+            model="claude-sonnet-5",
             max_tokens=500,
             system=_build_system_prompt(),
             messages=[{
@@ -499,7 +558,7 @@ A single self-contained dark-theme HTML page (background #1e1e1e, text #e8e8e8, 
 def ask_mara_vision_code(prompt: str, img_b64: str) -> tuple[str, str]:
     try:
         response = client.messages.create(
-            model="claude-sonnet-4-6",
+            model="claude-sonnet-5",
             max_tokens=2000,
             system=_VISION_CODE_SYSTEM,
             messages=[{
