@@ -3,9 +3,9 @@ import random
 from PyQt5.QtWidgets import QWidget, QDesktopWidget
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QPainter, QColor, QRadialGradient, QPen, QBrush
+from core.config import ORB_SIZE
 
 
-ORB_SIZE = 180
 ORB_R    = 77
 CX       = ORB_SIZE / 2
 CY       = ORB_SIZE / 2
@@ -288,8 +288,10 @@ class MARAOrb(QWidget):
 
         
         bg = QRadialGradient(CX, CY, ORB_R + 8)
-        c_in  = QColor(col["bg_inner"]); c_in.setAlpha(210)
-        c_out = QColor(col["bg_outer"]); c_out.setAlpha(0)
+        c_in  = QColor(col["bg_inner"])
+        c_in.setAlpha(210)
+        c_out = QColor(col["bg_outer"])
+        c_out.setAlpha(0)
         bg.setColorAt(0.0,  c_in)
         bg.setColorAt(0.78, c_in)
         bg.setColorAt(1.0,  c_out)
@@ -344,8 +346,10 @@ class MARAOrb(QWidget):
 
             
             glow = QRadialGradient(x, y, sz * 3)
-            gc = QColor(pulse.color); gc.setAlpha(int(90 * vis))
-            tc = QColor(pulse.color); tc.setAlpha(0)
+            gc = QColor(pulse.color)
+            gc.setAlpha(int(90 * vis))
+            tc = QColor(pulse.color)
+            tc.setAlpha(0)
             glow.setColorAt(0, gc)
             glow.setColorAt(1, tc)
             p.setBrush(QBrush(glow))
@@ -353,7 +357,8 @@ class MARAOrb(QWidget):
             p.drawEllipse(int(x - sz*3), int(y - sz*3), int(sz*6), int(sz*6))
 
            
-            cc = QColor(pulse.color); cc.setAlpha(int(220 * vis))
+            cc = QColor(pulse.color)
+            cc.setAlpha(int(220 * vis))
             p.setBrush(QBrush(cc))
             p.drawEllipse(int(x - sz*0.7), int(y - sz*0.7), int(sz*1.4), int(sz*1.4))
 
@@ -372,28 +377,35 @@ class MARAOrb(QWidget):
 
             
             g = QRadialGradient(px, py, nr * 4)
-            gc = QColor(nc); gc.setAlpha(int(70 * brightness))
-            tc = QColor(nc); tc.setAlpha(0)
-            g.setColorAt(0, gc); g.setColorAt(1, tc)
+            gc = QColor(nc)
+            gc.setAlpha(int(70 * brightness))
+            tc = QColor(nc)
+            tc.setAlpha(0)
+            g.setColorAt(0, gc)
+            g.setColorAt(1, tc)
             p.setBrush(QBrush(g))
             p.setPen(Qt.NoPen)
             p.drawEllipse(int(px - nr*4), int(py - nr*4), int(nr*8), int(nr*8))
 
             
-            fc = QColor(col["bg_inner"]); fc.setAlpha(180)
-            border = QColor(nc); border.setAlpha(int(180 * brightness))
+            fc = QColor(col["bg_inner"])
+            fc.setAlpha(180)
+            border = QColor(nc)
+            border.setAlpha(int(180 * brightness))
             p.setBrush(QBrush(fc))
             p.setPen(QPen(border, 0.7))
             p.drawEllipse(int(px - nr), int(py - nr), int(nr*2), int(nr*2))
 
             
-            bright_c = QColor(nc); bright_c.setAlpha(int(210 * brightness))
+            bright_c = QColor(nc)
+            bright_c.setAlpha(int(210 * brightness))
             p.setBrush(QBrush(bright_c))
             p.setPen(Qt.NoPen)
             p.drawEllipse(int(px - nr*0.4), int(py - nr*0.4), int(nr*0.8), int(nr*0.8))
 
         
-        rim = QColor(col["rim"]); rim.setAlpha(25)
+        rim = QColor(col["rim"])
+        rim.setAlpha(25)
         p.setPen(QPen(rim, 1.0))
         p.setBrush(Qt.NoBrush)
         p.drawEllipse(
@@ -403,8 +415,10 @@ class MARAOrb(QWidget):
 
         
         highlight = QRadialGradient(CX - ORB_R * 0.3, CY - ORB_R * 0.35, ORB_R * 0.55)
-        hc = QColor(255, 255, 255); hc.setAlpha(12)
-        ht = QColor(255, 255, 255); ht.setAlpha(0)
+        hc = QColor(255, 255, 255)
+        hc.setAlpha(12)
+        ht = QColor(255, 255, 255)
+        ht.setAlpha(0)
         highlight.setColorAt(0, hc)
         highlight.setColorAt(1, ht)
         p.setBrush(QBrush(highlight))

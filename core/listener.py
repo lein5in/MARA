@@ -6,24 +6,24 @@ import sounddevice as sd
 import scipy.io.wavfile as wav
 import whisper
 import keyboard
+from core.config import TRIGGER_KEY, WHISPER_MODEL, STT_SAMPLE_RATE as SAMPLE_RATE, STT_CHUNK_SIZE as CHUNK_SIZE
+from core.log import get_logger
+log = get_logger(__name__)
 
 
-print("Chargement de Whisper...")
+log.info("Chargement de Whisper...")
 model = None
 _model_ready = threading.Event()
 
 def _load_whisper():
     global model
-    model = whisper.load_model("turbo")
+    model = whisper.load_model(WHISPER_MODEL)
     _model_ready.set()
-    print("Whisper prêt.")
+    log.info("Whisper prêt.")
 
 threading.Thread(target=_load_whisper, daemon=True).start()
 
 
-SAMPLE_RATE    = 16000
-CHUNK_SIZE     = 512
-TRIGGER_KEY    = "f13"   
 
 
 _whisper_lock = threading.Lock()
@@ -54,7 +54,7 @@ def listen() -> str:
     """
     _model_ready.wait()
 
-    print("Maintiens le bouton souris pour parler...")
+    log.info("Maintiens le bouton souris pour parler...")
 
     
     keyboard.wait(TRIGGER_KEY, suppress=True)
@@ -63,7 +63,7 @@ def listen() -> str:
     if _get_is_speaking():
         return ""
 
-    print("🎙️ J'écoute...")
+    log.info("🎙️ J'écoute...")
     audio_chunks = []
 
     with sd.InputStream(
@@ -77,7 +77,7 @@ def listen() -> str:
             chunk_np = np.frombuffer(chunk, dtype=np.int16)
             audio_chunks.append(chunk_np)
 
-    print("Traitement...")
+    log.info("Traitement...")
 
     if not audio_chunks:
         return ""
@@ -107,5 +107,5 @@ def listen() -> str:
 
     text = result["text"].strip()
     if text:
-        print(f"Tu as dit : {text}")
+        log.debug(f"Tu as dit : {text}")
     return text

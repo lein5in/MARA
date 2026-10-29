@@ -6,14 +6,17 @@ from PyQt5.QtCore import Qt
 from core.ui import MARAWindow, MARAWorker
 from core.orb import MARAOrb
 from core.app_registry import get_registry
+from core.log import get_logger
+
+log = get_logger(__name__)
 
 def main():
+    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
     app = QApplication(sys.argv)
-    app.setAttribute(Qt.AA_EnableHighDpiScaling)
     app.setQuitOnLastWindowClosed(False)
 
-    print("MARA initialisée.")
-    print("Scan des applications...")
+    log.info("MARA initialisée.")
+    log.info("Scan des applications...")
     get_registry()
 
     text_queue = queue.Queue()

@@ -1,16 +1,14 @@
-import os
 import re
 import json
 import threading
 from anthropic import Anthropic
-from dotenv import load_dotenv
 from memory.memory import Memory
 from core import system
+from core.config import ANTHROPIC_API_KEY, USER_NAME, MODEL_MAIN, MODEL_FAST, MAX_HISTORY
+from core.log import get_logger
+log = get_logger(__name__)
 
-load_dotenv()
-
-client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-USER_NAME = os.getenv("USER_NAME", "")
+client = Anthropic(api_key=ANTHROPIC_API_KEY)
 
 ABOUT_USER = f"""
 ABOUT {USER_NAME}
@@ -30,8 +28,6 @@ PERSONALITY ADJUSTMENT FOR {USER_NAME}
 """
 
 memory = Memory()
-
-MAX_HISTORY = 20
 
 BASE_SYSTEM_PROMPT = f"""You are MARA (Modular Adaptive Response Assistant), the personal vocal assistant of {USER_NAME}.
 
@@ -268,7 +264,7 @@ WORK_MODE_NO_FILE = {
 def _detect_language(user_input: str) -> str:
     try:
         response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=MODEL_FAST,
             max_tokens=5,
             system=LANGUAGE_PROMPT,
             messages=[{"role": "user", "content": user_input}]
@@ -276,13 +272,13 @@ def _detect_language(user_input: str) -> str:
         lang = response.content[0].text.strip().lower()
         return lang if lang in ("fr", "en", "ar") else "en"
     except Exception as e:
-        print(f"[Language] Detection failed: {e}")
+        log.error(f"[Language] Detection failed: {e}")
         return "en"
 
 def _extract_and_save(user_input: str, language: str = "en"):
     try:
         response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=MODEL_FAST,
             max_tokens=100,
             system=EXTRACTION_PROMPT,
             messages=[{"role": "user", "content": user_input}]
@@ -296,16 +292,16 @@ def _extract_and_save(user_input: str, language: str = "en"):
 
         if info_type == "fact" and fact:
             memory.add_fact(fact)
-            print(f"[Memory] Fact saved: {fact}")
+            log.debug(f"[Memory] Fact saved: {fact}")
         elif info_type == "preference" and fact:
             memory.add_preference(fact)
-            print(f"[Memory] Preference saved: {fact}")
+            log.debug(f"[Memory] Preference saved: {fact}")
         elif info_type == "context" and fact:
             memory.add_context(fact)
-            print(f"[Memory] Context saved: {fact}")
+            log.debug(f"[Memory] Context saved: {fact}")
 
     except Exception as e:
-        print(f"[Memory] Silent extraction failed: {e}")
+        log.error(f"[Memory] Silent extraction failed: {e}")
 
 def _build_system_prompt() -> str:
     memory_context = memory.get_context_for_prompt()
@@ -365,7 +361,7 @@ def _answer_memory_query(user_input: str, language: str) -> str:
         return _get_response("memory_query_empty", language)
     try:
         response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=MODEL_FAST,
             max_tokens=150,
             system=(
                 "Answer the user's question naturally and conversationally, using only the "
@@ -377,7 +373,7 @@ def _answer_memory_query(user_input: str, language: str) -> str:
         )
         return response.content[0].text.strip()
     except Exception as e:
-        print(f"[Memory] Query failed: {e}")
+        log.error(f"[Memory] Query failed: {e}")
         return _get_response("memory_query_empty", language)
 
 def handle_memory_command(intent: str, content: str | None, language: str = "en", user_input: str = "") -> str:
@@ -386,13 +382,13 @@ def handle_memory_command(intent: str, content: str | None, language: str = "en"
 
     elif intent == "memory_add" and content:
         memory.add_fact(content)
-        print(f"[Memory] Forced add: {content}")
+        log.debug(f"[Memory] Forced add: {content}")
         return _get_response("memory_add", language)
 
     elif intent == "memory_forget":
         removed = memory.remove_last_fact()
         if removed:
-            print(f"[Memory] Removed: {removed}")
+            log.debug(f"[Memory] Removed: {removed}")
             return _get_response("memory_forget_ok", language)
         return _get_response("memory_forget_empty", language)
 
@@ -441,7 +437,7 @@ def ask_mara_stream(user_input: str):
 
     try:
         with client.messages.stream(
-            model="claude-sonnet-5",
+            model=MODEL_MAIN,
             max_tokens=1024,
             system=_build_system_prompt(),
             tools=TOOLS,
@@ -452,7 +448,7 @@ def ask_mara_stream(user_input: str):
                 yield text
             final_message = stream.get_final_message()
     except Exception as e:
-        print(f"[Sonnet] Stream error: {e}")
+        log.error(f"[Sonnet] Stream error: {e}")
         lang_thread.join()
         return
 
@@ -477,7 +473,7 @@ def ask_mara_stream(user_input: str):
 
     name = tool_call.name
     args = tool_call.input or {}
-    print(f"[Tool] {name}")
+    log.info(f"[Tool] {name}")
 
     if name == "generate_visual":
         yield f"__VISUAL__{args.get('prompt', user_input)}"
@@ -512,7 +508,7 @@ def ask_mara_stream(user_input: str):
 def clear_session():
     global conversation_history
     conversation_history = []
-    print("[Session] History cleared.")
+    log.info("[Session] History cleared.")
 
 def _remember_turn(user_content: str, assistant_content: str):
     conversation_history.append({"role": "user", "content": user_content})
@@ -524,7 +520,7 @@ def ask_mara_vision_stream(prompt: str, img_b64: str):
     full_response = ""
     try:
         with client.messages.stream(
-            model="claude-sonnet-5",
+            model=MODEL_MAIN,
             max_tokens=500,
             system=_build_system_prompt(),
             messages=[{
@@ -541,7 +537,7 @@ def ask_mara_vision_stream(prompt: str, img_b64: str):
                 full_response += text
                 yield text
     except Exception as e:
-        print(f"[Vision] Stream error: {e}")
+        log.error(f"[Vision] Stream error: {e}")
         yield f"Vision error: {e}"
         return
 
@@ -558,7 +554,7 @@ A single self-contained dark-theme HTML page (background #1e1e1e, text #e8e8e8, 
 def ask_mara_vision_code(prompt: str, img_b64: str) -> tuple[str, str]:
     try:
         response = client.messages.create(
-            model="claude-sonnet-5",
+            model=MODEL_MAIN,
             max_tokens=2000,
             system=_VISION_CODE_SYSTEM,
             messages=[{

@@ -6,8 +6,11 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import TimeoutException, WebDriverException
+from selenium.common.exceptions import WebDriverException
 from memory.credentials import credentials
+from core.config import BROWSER_TIMEOUT
+from core.log import get_logger
+log = get_logger(__name__)
 
 
 SITE_CONFIGS = {
@@ -93,7 +96,7 @@ class BrowserController:
         options.add_experimental_option("useAutomationExtension", False)
 
         self._driver = webdriver.Chrome(options=options)
-        print(f"[Browser] Chrome MARA lancé → profil : {mara_profile}")
+        log.info(f"[Browser] Chrome MARA lancé → profil : {mara_profile}")
         return self._driver
 
    
@@ -105,7 +108,7 @@ class BrowserController:
         self._get_driver().get(url)
         return f"Navigué vers : {url}"
 
-    def click(self, selector: str, by: str = "css", timeout: int = 10) -> str:
+    def click(self, selector: str, by: str = "css", timeout: int = BROWSER_TIMEOUT) -> str:
         """Clique sur un élément — attend qu'il soit cliquable."""
         by_type = BY_MAP.get(by.lower(), By.CSS_SELECTOR)
         element = WebDriverWait(self._get_driver(), timeout).until(
@@ -114,7 +117,7 @@ class BrowserController:
         element.click()
         return f"Cliqué : {selector}"
 
-    def type_text(self, selector: str, text: str, by: str = "css", timeout: int = 10, clear: bool = True) -> str:
+    def type_text(self, selector: str, text: str, by: str = "css", timeout: int = BROWSER_TIMEOUT, clear: bool = True) -> str:
         """Tape du texte dans un champ — attend qu'il soit présent."""
         by_type = BY_MAP.get(by.lower(), By.CSS_SELECTOR)
         element = WebDriverWait(self._get_driver(), timeout).until(
@@ -123,9 +126,9 @@ class BrowserController:
         if clear:
             element.clear()
         element.send_keys(text)
-        return f"Texte saisi."
+        return "Texte saisi."
 
-    def wait_for(self, selector: str, by: str = "css", timeout: int = 10) -> str:
+    def wait_for(self, selector: str, by: str = "css", timeout: int = BROWSER_TIMEOUT) -> str:
         """Attend qu'un élément soit présent dans le DOM."""
         by_type = BY_MAP.get(by.lower(), By.CSS_SELECTOR)
         WebDriverWait(self._get_driver(), timeout).until(
@@ -133,7 +136,7 @@ class BrowserController:
         )
         return f"Élément détecté : {selector}"
 
-    def read_element(self, selector: str, by: str = "css", timeout: int = 10) -> str:
+    def read_element(self, selector: str, by: str = "css", timeout: int = BROWSER_TIMEOUT) -> str:
         """Lit le texte d'un élément spécifique et le retourne."""
         by_type = BY_MAP.get(by.lower(), By.CSS_SELECTOR)
         element = WebDriverWait(self._get_driver(), timeout).until(
@@ -182,7 +185,7 @@ class BrowserController:
                 text = ""
 
        
-        lines = [l.strip() for l in text.splitlines() if l.strip()]
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
         clean = " | ".join(lines)[:max_chars]
 
         return f"Page : {title}\n{clean}" if clean else f"Page : {title} (contenu non lisible)"

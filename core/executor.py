@@ -8,7 +8,10 @@ from pathlib import Path
 from core.app_registry import get_registry, find_app
 from core.browser import browser
 from core import system
+from core.config import BROWSER_TIMEOUT, WINDOW_WAIT_TIMEOUT
 from memory.memory import Memory
+from core.log import get_logger
+log = get_logger(__name__)
 
 _registry = get_registry()
 
@@ -122,7 +125,8 @@ def execute(actions: list) -> list[str]:
             result = f"Erreur sur {action_type} : {e}"
 
         results.append(result)
-        print(f"[Executor] {action_type} → {result}")
+        log.info(f"[Executor] {action_type}")
+        log.debug(f"[Executor] {action_type} → {result}")
 
     return results
 
@@ -133,7 +137,7 @@ def _get_foreground_window():
     except Exception:
         return None
 
-def _wait_for_new_window(prev_hwnd, timeout=4.0):
+def _wait_for_new_window(prev_hwnd, timeout=WINDOW_WAIT_TIMEOUT):
     try:
         import win32gui
     except ImportError:
@@ -319,7 +323,7 @@ def _browser_navigate(action: dict) -> str:
 def _browser_click(action: dict) -> str:
     selector = action.get("selector", "")
     by = action.get("by", "css")
-    timeout = action.get("timeout", 10)
+    timeout = action.get("timeout", BROWSER_TIMEOUT)
     if not selector:
         return "Sélecteur vide."
     return browser.click(selector, by=by, timeout=timeout)
@@ -355,7 +359,7 @@ def _browser_delete_credentials(action: dict) -> str:
 def _browser_wait(action: dict) -> str:
     selector = action.get("selector", "")
     by = action.get("by", "css")
-    timeout = action.get("timeout", 10)
+    timeout = action.get("timeout", BROWSER_TIMEOUT)
     if not selector:
         return "Sélecteur vide."
     return browser.wait_for(selector, by=by, timeout=timeout)
@@ -404,9 +408,9 @@ def _windows_search(name: str, folder: str | None, find_folder: bool) -> Path | 
                 parsed = urlparse(url)
                 real_path = unquote(parsed.path).lstrip("/")
                 real_path = real_path.replace("/", "\\")
-                print(f"[Search] Trouvé via index Windows : {real_path}")
+                log.debug(f"[Search] Trouvé via index Windows : {real_path}")
                 return Path(real_path)
-        print(f"[Search] Index Windows : aucun résultat pour '{name}'")
+        log.debug(f"[Search] Index Windows : aucun résultat pour '{name}'")
         return None
     finally:
         rs.Close()
@@ -425,9 +429,9 @@ def _find_file(name: str, folder: str, find_folder: bool = False) -> Path | None
         if result and result.exists():
             return result
     except Exception as e:
-        print(f"[Search] Windows Search indisponible, fallback scan disque : {e}")
+        log.debug(f"[Search] Windows Search indisponible, fallback scan disque : {e}")
 
-    print(f"[Search] Fallback scan disque pour '{name}'")
+    log.debug(f"[Search] Fallback scan disque pour '{name}'")
     priority_folders = [
         Path.home() / "Documents",
         Path.home() / "Desktop",

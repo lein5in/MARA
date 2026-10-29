@@ -6,7 +6,7 @@ env/
 .env
 
 # Config et secrets
-config.py
+/config.py
 secrets.json
 
 # Python
@@ -37,3 +37,7 @@ launch_mara.bat
 launch_mara.vbs
 
 assets/app_registry.json
+# Logs
+debug.log
+*.log
+.ruff_cache/

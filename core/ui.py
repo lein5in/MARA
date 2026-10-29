@@ -1,4 +1,3 @@
-import sys
 import re
 import json
 import queue
@@ -6,7 +5,7 @@ import threading
 from datetime import datetime
 
 from PyQt5.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QHBoxLayout,
+    QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLineEdit, QScrollArea, QLabel,
     QFrame, QSizePolicy, QDesktopWidget
 )
@@ -14,7 +13,10 @@ from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont, QColor, QPainter, QBrush
 from PyQt5.QtWebEngineWidgets import QWebEngineView
 
-from core.brain import _build_system_prompt
+from core.brain import _build_system_prompt  # noqa: F401
+from core.config import ANTHROPIC_API_KEY, MODEL_VISUAL, WIN_W, WIN_H
+from core.log import get_logger
+log = get_logger(__name__)
 
 READ_ACTIONS = {"browser_read", "get_volume", "get_brightness", "wifi_status", "get_time"}
 
@@ -31,8 +33,6 @@ BORDER       = "#3a3a3d"
 BORDER_LIGHT = "#454548"
 PILL_BG      = "#2b2b2e"
 
-WIN_W = 680
-WIN_H = 700
 
 def _font(size: int, bold: bool = False) -> QFont:
     return QFont("Segoe UI", size, QFont.Bold if bold else QFont.Normal)
@@ -428,14 +428,14 @@ class MARAWindow(QWidget):
         send_btn = QPushButton("↑")
         send_btn.setFixedSize(36, 36)
         send_btn.setFont(_font(15, bold=True))
-        send_btn.setStyleSheet(f"""
-            QPushButton {{
+        send_btn.setStyleSheet("""
+            QPushButton {
                 background: #000000;
                 border: none; color: white;
                 border-radius: 18px;
-            }}
-            QPushButton:hover {{ background: #333333; }}
-            QPushButton:pressed {{ background: #000000; }}
+            }
+            QPushButton:hover { background: #333333; }
+            QPushButton:pressed { background: #000000; }
         """)
         send_btn.clicked.connect(self._send)
         ilay.addWidget(send_btn)
@@ -709,7 +709,7 @@ Rules:
                           get_work_mode_ask, get_work_mode_launch):
         ask_msg = get_work_mode_ask(language)
         self.sig_done.emit(ask_msg, [])
-        print(f"MARA : {ask_msg}")
+        log.debug(f"MARA : {ask_msg}")
         speak_stream_fn(iter([ask_msg]))
 
         user_input, source = self._get_input()
@@ -734,15 +734,12 @@ Rules:
         launch_msg = get_work_mode_launch(language, has_file)
         chips = [a.get("command", a.get("name", a.get("type", ""))) for a in actions]
         self.sig_done.emit(launch_msg, chips)
-        print(f"MARA : {launch_msg}")
+        log.debug(f"MARA : {launch_msg}")
         speak_stream_fn(iter([launch_msg]))
         execute_fn(actions)
 
     def _handle_visual(self, prompt: str, speak_stream_fn):
         from anthropic import Anthropic
-        import os
-        from dotenv import load_dotenv
-        load_dotenv()
 
         self.sig_status.emit("THINKING")
 
@@ -751,9 +748,9 @@ Rules:
         speak_stream_fn(iter([thinking_msg]))
 
         try:
-            client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+            client = Anthropic(api_key=ANTHROPIC_API_KEY)
             response = client.messages.create(
-                model="claude-sonnet-4-6",
+                model=MODEL_VISUAL,
                 max_tokens=4096,
                 system=self._VISUAL_SYSTEM,
                 messages=[{"role": "user", "content": prompt}]
@@ -775,7 +772,7 @@ Rules:
 
         except Exception as e:
             err = f"Visual generation error: {e}"
-            print(f"[Visual] {err}")
+            log.debug(f"[Visual] {err}")
             self.sig_done.emit(err, [])
 
         self.sig_status.emit("OPERATIONAL")
@@ -846,7 +843,7 @@ Rules:
                 msg = MEMORY_RESPONSES["ui_show"].get(language, "Here I am.")
                 self.sig_show.emit()
                 self.sig_done.emit(msg, [])
-                print(f"MARA : {msg}")
+                log.debug(f"MARA : {msg}")
                 speak_stream_sentences(iter([msg]))
                 self.sig_status.emit("OPERATIONAL")
                 continue
@@ -856,7 +853,7 @@ Rules:
                 from core.brain import MEMORY_RESPONSES
                 msg = MEMORY_RESPONSES["ui_hide"].get(language, "Going dark.")
                 self.sig_done.emit(msg, [])
-                print(f"MARA : {msg}")
+                log.debug(f"MARA : {msg}")
                 speak_stream_sentences(iter([msg]))
                 self.sig_hide.emit()
                 self.sig_status.emit("OPERATIONAL")
@@ -922,7 +919,7 @@ Rules:
             self.sig_password_mode.emit(True)
 
         self.sig_done.emit(vocal, chips)
-        print(f"MARA : {vocal or full_response}")
+        log.debug(f"MARA : {vocal or full_response}")
 
         if vocal:
             self.sig_status.emit("SPEAKING")
@@ -939,13 +936,13 @@ Rules:
         if needs_confirmation(actions):
             confirm = "Cette action nécessite ta confirmation. Tu confirmes ?"
             self.sig_done.emit(confirm, [])
-            print(f"MARA : {confirm}")
+            log.debug(f"MARA : {confirm}")
             speak(confirm)
             reply, _ = self._get_input()
             if not any(w in (reply or "").lower() for w in ["yes","oui","confirm","go","ok"]):
                 cancel = "Action annulée."
                 self.sig_done.emit(cancel, [])
-                print(f"MARA : {cancel}")
+                log.debug(f"MARA : {cancel}")
                 speak(cancel)
                 return
 
@@ -964,26 +961,26 @@ Rules:
                     sr += chunk
                     self.sig_chunk.emit(chunk)
                 self.sig_done.emit(sr, [])
-                print(f"MARA (lecture) : {sr}")
+                log.debug(f"MARA (lecture) : {sr}")
                 self.sig_status.emit("SPEAKING")
                 speak_stream_sentences(iter([sr]))
                 self.sig_status.emit("OPERATIONAL")
 
             elif atype in READ_ACTIONS and result and not result.startswith("Erreur"):
                 self.sig_done.emit(result, [])
-                print(f"MARA ({atype}) : {result}")
+                log.debug(f"MARA ({atype}) : {result}")
                 self.sig_status.emit("SPEAKING")
                 speak_stream_sentences(iter([result]))
                 self.sig_status.emit("OPERATIONAL")
 
             elif atype == "pause" and result:
                 self.sig_done.emit(result, [])
-                print(f"MARA (pause) : {result}")
+                log.debug(f"MARA (pause) : {result}")
                 speak_stream_sentences(iter([result]))
 
             elif atype in ("silent_on", "silent_off") and result:
                 self.sig_done.emit(result, [])
-                print(f"MARA ({atype}) : {result}")
+                log.debug(f"MARA ({atype}) : {result}")
                 speak_stream_sentences(iter([result]))
 
     def _handle_vision(self, prompt, system, memory, speak_stream_sentences,
@@ -995,7 +992,7 @@ Rules:
         if not result:
             msg = "I can not take a screenshot right now."
             self.sig_done.emit(msg, [])
-            print(f"MARA : {msg}")
+            log.debug(f"MARA : {msg}")
             return
 
         self.sig_status.emit("THINKING")
@@ -1020,13 +1017,13 @@ Rules:
         if not result:
             msg = "I can not take a screenshot right now."
             self.sig_done.emit(msg, [])
-            print(f"MARA : {msg}")
+            log.debug(f"MARA : {msg}")
             return
 
         self.sig_status.emit("THINKING")
         thinking_msg = "Let me look at your code."
         self.sig_done.emit(thinking_msg, [])
-        print(f"MARA : {thinking_msg}")
+        log.debug(f"MARA : {thinking_msg}")
         speak_stream_sentences(iter([thinking_msg]))
 
         with open(result, "rb") as f:
@@ -1038,7 +1035,7 @@ Rules:
         self.sig_stream_start.emit()
         self.sig_chunk.emit(summary)
         self.sig_done.emit(summary, [])
-        print(f"MARA (vision code) : {summary}")
+        log.debug(f"MARA (vision code) : {summary}")
 
         self.sig_status.emit("SPEAKING")
         speak_stream_sentences(iter([summary]))

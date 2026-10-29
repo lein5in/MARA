@@ -2,12 +2,9 @@ import os
 import json
 from datetime import datetime
 from cryptography.fernet import Fernet
-from dotenv import load_dotenv
-
-load_dotenv()
-
-MEMORY_FILE = os.path.join(os.path.dirname(__file__), "mara_memory.enc")
-KEY_FILE    = os.path.join(os.path.dirname(__file__), "mara.key")
+from core.config import USER_NAME, MEMORY_PATH as MEMORY_FILE, KEY_PATH as KEY_FILE
+from core.log import get_logger
+log = get_logger(__name__)
 
 def _load_or_create_key() -> Fernet:
     if os.path.exists(KEY_FILE):
@@ -17,7 +14,7 @@ def _load_or_create_key() -> Fernet:
         key = Fernet.generate_key()
         with open(KEY_FILE, "wb") as f:
             f.write(key)
-        print("Nouvelle clé mémoire générée.")
+        log.info("Nouvelle clé mémoire générée.")
     return Fernet(key)
 
 _fernet = _load_or_create_key()
@@ -25,7 +22,7 @@ _fernet = _load_or_create_key()
 def _default_memory() -> dict:
     return {
         "user": {
-            "name":        os.getenv("USER_NAME", ""),
+            "name":        USER_NAME,
             "facts":       [],
             "preferences": [],
         },
@@ -55,7 +52,7 @@ class Memory:
                 data["paused_until"] = None
             return data
         except Exception as e:
-            print(f"Erreur lecture mémoire : {e} — mémoire réinitialisée.")
+            log.error(f"Erreur lecture mémoire : {e} — mémoire réinitialisée.")
             return _default_memory()
 
     def _save(self):
@@ -95,12 +92,12 @@ class Memory:
         self._data = _default_memory()
         self._data["paused_until"] = pause
         self._save()
-        print("Mémoire effacée.")
+        log.info("Mémoire effacée.")
 
     def set_pause(self, until_iso: str):
         self._data["paused_until"] = until_iso
         self._save()
-        print(f"[System] MARA en pause jusqu'à : {until_iso}")
+        log.info(f"[System] MARA en pause jusqu'à : {until_iso}")
 
     def get_pause(self) -> str | None:
         return self._data.get("paused_until")
@@ -108,7 +105,7 @@ class Memory:
     def clear_pause(self):
         self._data["paused_until"] = None
         self._save()
-        print("[System] Pause annulée.")
+        log.info("[System] Pause annulée.")
 
     def get_summary(self) -> str:
         facts = self._data["user"]["facts"]
@@ -151,4 +148,4 @@ class Memory:
         )
 
     def debug(self):
-        print(json.dumps(self._data, ensure_ascii=False, indent=2))
+        log.debug(f"Memory sections: {list(self._data.keys())}")

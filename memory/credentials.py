@@ -1,11 +1,10 @@
 import json
-from pathlib import Path
 from cryptography.fernet import Fernet
+from core.config import KEY_PATH, CREDENTIALS_PATH
+from core.log import get_logger
+log = get_logger(__name__)
 
 
-CREDENTIALS_DIR  = Path(__file__).parent
-KEY_PATH         = CREDENTIALS_DIR / "mara.key"
-CREDENTIALS_PATH = CREDENTIALS_DIR / "mara_credentials.enc"
 
 
 
@@ -29,7 +28,7 @@ class CredentialsManager:
             return KEY_PATH.read_bytes()
         key = Fernet.generate_key()
         KEY_PATH.write_bytes(key)
-        print("[Credentials] Clé générée.")
+        log.info("[Credentials] Clé générée.")
         return key
 
 
@@ -41,7 +40,7 @@ class CredentialsManager:
             decrypted = self._fernet.decrypt(encrypted)
             return json.loads(decrypted.decode())
         except Exception as e:
-            print(f"[Credentials] Erreur chargement : {e}")
+            log.error(f"[Credentials] Erreur chargement : {e}")
             return {}
 
     def _save(self):
@@ -55,7 +54,7 @@ class CredentialsManager:
         """Sauvegarde les identifiants d'un site."""
         self._data[site.lower()] = {"email": email, "password": password}
         self._save()
-        print(f"[Credentials] Sauvegardé : {site}")
+        log.info(f"[Credentials] Sauvegardé : {site}")
         return f"Credentials for {site} saved securely."
 
     def get_email(self, site: str) -> str | None:

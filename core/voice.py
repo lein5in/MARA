@@ -1,26 +1,18 @@
-import os
 import re
 import threading
 import queue
 import numpy as np
 import sounddevice as sd
-from dotenv import load_dotenv
 from fishaudio import FishAudio
 from fishaudio.types import TTSConfig
 from core.listener import set_speaking
 from core import system
-
-load_dotenv()
-
-FISH_API_KEY = os.getenv("FISH_API_KEY")
-VOICE_ID = "26e416bca5c74c5db7d6dd5a49caee13"
+from core.config import FISH_API_KEY, VOICE_ID, TTS_SAMPLE_RATE as SAMPLE_RATE, TTS_CHANNELS as CHANNELS, MIN_WORDS_SOFT
+from core.log import get_logger
+log = get_logger(__name__)
 
 client = FishAudio(api_key=FISH_API_KEY)
 
-SAMPLE_RATE = 44100
-CHANNELS = 1
-
-MIN_WORDS_SOFT = 8
 
 def clean_text(text: str) -> str:
     text = re.sub(r'\*\*?(.*?)\*\*?', r'\1', text)
@@ -68,7 +60,7 @@ def _synthesize_sentence(sentence: str, audio_queue: queue.Queue):
 
 def speak(text: str):
     if system.is_silent():
-        print(f"[Silent] {text}")
+        log.debug(f"[Silent] {text}")
         return
     try:
         set_speaking(True)
@@ -85,7 +77,7 @@ def speak(text: str):
         sd.play(samples, samplerate=SAMPLE_RATE)
         sd.wait()
     except Exception as e:
-        print(f"Erreur Fish Audio : {e}")
+        log.error(f"Erreur Fish Audio : {e}")
     finally:
         set_speaking(False)
 
@@ -102,7 +94,7 @@ def speak_stream_sentences(text_generator):
     if system.is_silent():
         for chunk in text_generator:
             full_text += chunk
-        print(f"[Silent] {full_text}")
+        log.debug(f"[Silent] {full_text}")
         return full_text
 
     audio_queue: queue.Queue = queue.Queue()
@@ -128,7 +120,7 @@ def speak_stream_sentences(text_generator):
             try:
                 _synthesize_sentence(sentence, audio_queue)
             except Exception as e:
-                print(f"[Voice] Synthesis error: {e}")
+                log.error(f"[Voice] Synthesis error: {e}")
 
     try:
         for chunk in text_generator:
@@ -160,7 +152,7 @@ def speak_stream_sentences(text_generator):
             flush(buffer)
 
     except Exception as e:
-        print(f"[Voice] Stream error: {e}")
+        log.error(f"[Voice] Stream error: {e}")
     finally:
         audio_queue.put(None)
         playback_thread.join()

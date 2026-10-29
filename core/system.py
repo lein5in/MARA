@@ -1,9 +1,10 @@
-import os
 import re
 import subprocess
 from datetime import datetime, timedelta
-from pathlib import Path
 from zoneinfo import ZoneInfo
+from core.config import SCREENSHOTS_DIR
+from core.log import get_logger
+log = get_logger(__name__)
 
 try:
     from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
@@ -12,24 +13,23 @@ try:
     _PYCAW_OK = True
 except ImportError:
     _PYCAW_OK = False
-    print("[System] pycaw non disponible — contrôle volume désactivé.")
+    log.warning("[System] pycaw non disponible — contrôle volume désactivé.")
 
 try:
     import screen_brightness_control as sbc
     _SBC_OK = True
 except ImportError:
     _SBC_OK = False
-    print("[System] screen_brightness_control non disponible — contrôle luminosité désactivé.")
+    log.warning("[System] screen_brightness_control non disponible — contrôle luminosité désactivé.")
 
 try:
     import pyautogui
-    from PIL import Image
+    from PIL import Image  # noqa: F401
     _SCREENSHOT_OK = True
 except ImportError:
     _SCREENSHOT_OK = False
-    print("[System] pyautogui/PIL non disponible — screenshots désactivés.")
+    log.warning("[System] pyautogui/PIL non disponible — screenshots désactivés.")
 
-SCREENSHOTS_DIR = Path.home() / "Pictures" / "Screenshots"
 SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
 
 _current_lang = "en"
@@ -45,7 +45,7 @@ _silent_mode = False
 def set_silent(val: bool):
     global _silent_mode
     _silent_mode = val
-    print(f"[System] Silent mode {'activé' if val else 'désactivé'}.")
+    log.info(f"[System] Silent mode {'activé' if val else 'désactivé'}.")
 
 def is_silent() -> bool:
     return _silent_mode
@@ -134,7 +134,7 @@ def _get_volume_interface():
         _volume_interface = cast(interface, POINTER(IAudioEndpointVolume))
         return _volume_interface
     except Exception as e:
-        print(f"[System] Erreur interface volume : {e}")
+        log.error(f"[System] Erreur interface volume : {e}")
         return None
 
 def set_volume(level: int) -> str:
@@ -260,7 +260,7 @@ def take_screenshot(filename: str | None = None) -> str:
         filepath = SCREENSHOTS_DIR / filename
         screenshot = pyautogui.screenshot()
         screenshot.save(str(filepath))
-        print(f"[System] Screenshot sauvegardé : {filepath}")
+        log.info(f"[System] Screenshot sauvegardé : {filepath}")
         return str(filepath)
     except Exception as e:
         return f"Erreur screenshot : {e}"
@@ -275,7 +275,7 @@ def take_screenshot_for_vision() -> str | None:
         screenshot.save(str(filepath))
         return str(filepath)
     except Exception as e:
-        print(f"[System] Erreur screenshot vision : {e}")
+        log.error(f"[System] Erreur screenshot vision : {e}")
         return None
 
 _DURATION_PATTERNS = [
@@ -336,7 +336,7 @@ def is_paused(memory) -> bool:
         target = datetime.fromisoformat(paused_until)
         if datetime.now() >= target:
             memory.clear_pause()
-            print("[System] Pause expirée — MARA réactivée.")
+            log.info("[System] Pause expirée — MARA réactivée.")
             return False
         return True
     except ValueError:

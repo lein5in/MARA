@@ -2,8 +2,9 @@ import os
 import json
 import subprocess
 from pathlib import Path
-
-REGISTRY_PATH = Path(__file__).parent.parent / "assets" / "app_registry.json"
+from core.config import REGISTRY_PATH, REGISTRY_SCAN_TIMEOUT
+from core.log import get_logger
+log = get_logger(__name__)
 
 
 BLACKLIST_NAMES = {
@@ -228,18 +229,18 @@ def _is_valid_entry(name: str, path: str) -> bool:
 
 def build_registry() -> dict:
     """Lance le scan PowerShell et construit le registre propre des apps."""
-    print("[Registry] Scan des applications en cours...")
+    log.info("[Registry] Scan des applications en cours...")
 
     try:
         result = subprocess.run(
             ["powershell", "-NoProfile", "-Command", PS_WIN32],
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=REGISTRY_SCAN_TIMEOUT
         )
         raw = result.stdout.strip()
         if not raw:
-            print("[Registry] Aucun résultat du scan.")
+            log.warning("[Registry] Aucun résultat du scan.")
             return {}
 
         apps_list = json.loads(raw)
@@ -273,11 +274,11 @@ def build_registry() -> dict:
         with open(REGISTRY_PATH, "w", encoding="utf-8") as f:
             json.dump(registry, f, indent=2, ensure_ascii=False)
 
-        print(f"[Registry] {len(registry)} apps indexées ({skipped} exclues) → {REGISTRY_PATH}")
+        log.info(f"[Registry] {len(registry)} apps indexées ({skipped} exclues) → {REGISTRY_PATH}")
         return registry
 
     except Exception as e:
-        print(f"[Registry] Erreur scan : {e}")
+        log.error(f"[Registry] Erreur scan : {e}")
         return {}
 
 
