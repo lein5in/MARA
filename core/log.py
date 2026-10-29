@@ -3,7 +3,10 @@ import os
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-LOG_DIR = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "MARA" / "logs"
+if os.environ.get("MARA_DATA_DIR"):
+    LOG_DIR = Path(os.environ["MARA_DATA_DIR"]) / "logs"
+else:
+    LOG_DIR = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "MARA" / "logs"
 LOG_FILE = LOG_DIR / "mara.log"
 FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 

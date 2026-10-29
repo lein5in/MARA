@@ -6,6 +6,7 @@ import sounddevice as sd
 import scipy.io.wavfile as wav
 import whisper
 import keyboard
+from core import system
 from core.config import TRIGGER_KEY, WHISPER_MODEL, STT_SAMPLE_RATE as SAMPLE_RATE, STT_CHUNK_SIZE as CHUNK_SIZE
 from core.log import get_logger
 log = get_logger(__name__)
@@ -31,23 +32,6 @@ threading.Thread(target=_load_whisper, daemon=True).start()
 _whisper_lock = threading.Lock()
 
 
-_is_speaking   = False
-_speaking_lock = threading.Lock()
-
-def set_speaking(val: bool):
-    """
-    Appelé par voice.py avant/après chaque playback TTS.
-    Thread-safe — évite que le listener capte la voix de MARA.
-    """
-    global _is_speaking
-    with _speaking_lock:
-        _is_speaking = val
-
-def _get_is_speaking() -> bool:
-    with _speaking_lock:
-        return _is_speaking
-
-
 
 def listen() -> str:
     """
@@ -62,7 +46,7 @@ def listen() -> str:
     keyboard.wait(TRIGGER_KEY, suppress=True)
 
     
-    if _get_is_speaking():
+    if system.is_speaking():
         return ""
 
     log.info("🎙️ J'écoute...")

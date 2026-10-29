@@ -1,30 +1,28 @@
-import re
 import threading
 import queue
 import numpy as np
 import sounddevice as sd
 from fishaudio import FishAudio
 from fishaudio.types import TTSConfig
-from core.listener import set_speaking
 from core import system
+from core.text import clean_text, pcm16_from_wav, SentenceBuffer
 from core.config import FISH_API_KEY, VOICE_ID, TTS_SAMPLE_RATE as SAMPLE_RATE, TTS_CHANNELS as CHANNELS, MIN_WORDS_SOFT
 from core.log import get_logger
 log = get_logger(__name__)
 
-client = FishAudio(api_key=FISH_API_KEY)
+_client = None
 
 
-def clean_text(text: str) -> str:
-    text = re.sub(r'\*\*?(.*?)\*\*?', r'\1', text)
-    text = re.sub(r'#{1,6}\s', '', text)
-    text = re.sub(r'`{3}.*?`{3}', ' Check the code on screen. ', text, flags=re.DOTALL)
-    text = re.sub(r'`([^`]*?)`', r'\1', text)
-    text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)
-    text = re.sub(r'^\s*[-•]\s', '', text, flags=re.MULTILINE)
-    text = re.sub(r'[^\x00-\x7F\u00C0-\u024F\u1E00-\u1EFF]', '', text)
-    text = re.sub(r'\b[A-Z]{2,}\b', lambda m: m.group().lower(), text)
-    text = re.sub(r'\s+', ' ', text).strip()
-    return text
+def _get_client():
+    global _client
+    if _client is None:
+        _client = FishAudio(api_key=FISH_API_KEY)
+    return _client
+
+
+def _tts_config() -> TTSConfig:
+    return TTSConfig(reference_id=VOICE_ID, format="wav", latency="balanced")
+
 
 def play_pcm_stream(audio_queue: queue.Queue):
     with sd.OutputStream(samplerate=SAMPLE_RATE, channels=CHANNELS, dtype='int16') as stream:
@@ -32,61 +30,57 @@ def play_pcm_stream(audio_queue: queue.Queue):
             chunk = audio_queue.get()
             if chunk is None:
                 break
-            samples = np.frombuffer(chunk, dtype=np.int16)
-            stream.write(samples)
+            if len(chunk) % 2:
+                chunk = chunk[:-1]
+            stream.write(np.frombuffer(chunk, dtype=np.int16))
+
 
 def _synthesize_sentence(sentence: str, audio_queue: queue.Queue):
     sentence = clean_text(sentence)
     if not sentence:
         return
 
-    config = TTSConfig(
-        reference_id=VOICE_ID,
-        format="wav",
-        latency="balanced"
-    )
-
     header_skipped = False
     header_buffer = b""
+    carry = b""
 
-    for audio_chunk in client.tts.stream_websocket(iter([sentence]), config=config):
+    for audio_chunk in _get_client().tts.stream_websocket(iter([sentence]), config=_tts_config()):
         if not header_skipped:
             header_buffer += audio_chunk
-            if len(header_buffer) >= 44:
-                audio_queue.put(header_buffer[44:])
-                header_skipped = True
+            if len(header_buffer) < 44:
+                continue
+            audio_chunk = header_buffer[44:]
+            header_skipped = True
+        data = carry + audio_chunk
+        if len(data) % 2:
+            carry, data = data[-1:], data[:-1]
         else:
-            audio_queue.put(audio_chunk)
+            carry = b""
+        if data:
+            audio_queue.put(data)
+
 
 def speak(text: str):
     if system.is_silent():
         log.debug(f"[Silent] {text}")
         return
+    text = clean_text(text)
+    if not text:
+        return
     try:
-        set_speaking(True)
-        config = TTSConfig(
-            reference_id=VOICE_ID,
-            format="wav",
-            latency="balanced"
-        )
-        audio_data = b""
-        for chunk in client.tts.convert(text=clean_text(text), config=config):
-            audio_data += chunk
-        pcm_data = audio_data[44:]
-        samples = np.frombuffer(pcm_data, dtype=np.int16)
-        sd.play(samples, samplerate=SAMPLE_RATE)
+        system.set_speaking(True)
+        audio = _get_client().tts.convert(text=text, config=_tts_config())
+        pcm = pcm16_from_wav(bytes(audio))
+        if not pcm:
+            log.warning("[Voice] TTS returned no audio")
+            return
+        sd.play(np.frombuffer(pcm, dtype=np.int16), samplerate=SAMPLE_RATE)
         sd.wait()
-    except Exception as e:
-        log.error(f"Erreur Fish Audio : {e}")
+    except Exception:
+        log.exception("[Voice] speak() failed")
     finally:
-        set_speaking(False)
+        system.set_speaking(False)
 
-def speak_stream(text_generator):
-    def _gen():
-        for chunk in text_generator:
-            yield chunk
-
-    return speak_stream_sentences(_gen())
 
 def speak_stream_sentences(text_generator):
     full_text = ""
@@ -98,64 +92,29 @@ def speak_stream_sentences(text_generator):
         return full_text
 
     audio_queue: queue.Queue = queue.Queue()
-
-    playback_thread = threading.Thread(
-        target=play_pcm_stream,
-        args=(audio_queue,),
-        daemon=True
-    )
+    playback_thread = threading.Thread(target=play_pcm_stream, args=(audio_queue,), daemon=True)
     playback_thread.start()
-
-    set_speaking(True)
-
-    HARD = re.compile(r'[.!?]+')
-    SOFT = re.compile(r'[,;:]+')
-
-    buffer = ""
-    word_count = 0
+    system.set_speaking(True)
 
     def flush(sentence: str):
-        sentence = sentence.strip()
-        if sentence:
-            try:
-                _synthesize_sentence(sentence, audio_queue)
-            except Exception as e:
-                log.error(f"[Voice] Synthesis error: {e}")
+        try:
+            _synthesize_sentence(sentence, audio_queue)
+        except Exception:
+            log.exception("[Voice] Synthesis error")
 
+    splitter = SentenceBuffer(soft_min_words=MIN_WORDS_SOFT)
     try:
         for chunk in text_generator:
             full_text += chunk
-            buffer += chunk
-            word_count += len(chunk.split())
-
-            if HARD.search(buffer):
-                parts = HARD.split(buffer)
-
-                for part in parts[:-1]:
-                    flush(part)
-                buffer = parts[-1]
-                word_count = len(buffer.split())
-
-            elif SOFT.search(buffer) and word_count >= MIN_WORDS_SOFT:
-                parts = SOFT.split(buffer)
-                for part in parts[:-1]:
-                    flush(part)
-                buffer = parts[-1]
-                word_count = len(buffer.split())
-
-            elif word_count >= 40:
-                flush(buffer)
-                buffer = ""
-                word_count = 0
-
-        if buffer.strip():
-            flush(buffer)
-
-    except Exception as e:
-        log.error(f"[Voice] Stream error: {e}")
+            for sentence in splitter.feed(chunk):
+                flush(sentence)
+        for sentence in splitter.flush():
+            flush(sentence)
+    except Exception:
+        log.exception("[Voice] Stream error")
     finally:
         audio_queue.put(None)
         playback_thread.join()
-        set_speaking(False)
+        system.set_speaking(False)
 
     return full_text

@@ -38,8 +38,9 @@ WINDOW_WAIT_TIMEOUT = 4.0
 REGISTRY_SCAN_TIMEOUT = 30
 
 PROJECT_ROOT = Path(__file__).parent.parent
-DATA_DIR = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming") / "MARA"
-LOCAL_DIR = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "MARA"
+_DATA_OVERRIDE = os.environ.get("MARA_DATA_DIR")
+DATA_DIR = Path(_DATA_OVERRIDE) if _DATA_OVERRIDE else Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming") / "MARA"
+LOCAL_DIR = DATA_DIR / "local" if _DATA_OVERRIDE else Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "MARA"
 CHROME_PROFILE_DIR = LOCAL_DIR / "ChromeProfile"
 REGISTRY_PATH = DATA_DIR / "app_registry.json"
 KEY_PATH = DATA_DIR / "mara.key"
@@ -49,14 +50,17 @@ PROFILE_PATH = DATA_DIR / "profile.md"
 PROFILE_EXAMPLE_PATH = PROJECT_ROOT / "profile.example.md"
 
 _LEGACY_MEMORY_DIR = PROJECT_ROOT / "memory"
-migrate_legacy_data(
-    DATA_DIR,
-    key=(_LEGACY_MEMORY_DIR / "mara.key", KEY_PATH),
-    encrypted=[
-        (_LEGACY_MEMORY_DIR / "mara_memory.enc", MEMORY_PATH),
-        (_LEGACY_MEMORY_DIR / "mara_credentials.enc", CREDENTIALS_PATH),
-    ],
-    plain=[(PROJECT_ROOT / "assets" / "app_registry.json", REGISTRY_PATH)],
-)
+if _DATA_OVERRIDE:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+else:
+    migrate_legacy_data(
+        DATA_DIR,
+        key=(_LEGACY_MEMORY_DIR / "mara.key", KEY_PATH),
+        encrypted=[
+            (_LEGACY_MEMORY_DIR / "mara_memory.enc", MEMORY_PATH),
+            (_LEGACY_MEMORY_DIR / "mara_credentials.enc", CREDENTIALS_PATH),
+        ],
+        plain=[(PROJECT_ROOT / "assets" / "app_registry.json", REGISTRY_PATH)],
+    )
 
-SCREENSHOTS_DIR = Path.home() / "Pictures" / "Screenshots"
+SCREENSHOTS_DIR = DATA_DIR / "screenshots" if _DATA_OVERRIDE else Path.home() / "Pictures" / "Screenshots"

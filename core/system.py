@@ -1,5 +1,6 @@
 import re
 import subprocess
+import threading
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from core.config import SCREENSHOTS_DIR
@@ -39,6 +40,17 @@ def set_current_lang(lang: str):
     lang = lang.lower().strip()
     if lang in ("fr", "en", "ar"):
         _current_lang = lang
+
+_is_speaking = threading.Event()
+
+def set_speaking(val: bool):
+    if val:
+        _is_speaking.set()
+    else:
+        _is_speaking.clear()
+
+def is_speaking() -> bool:
+    return _is_speaking.is_set()
 
 _silent_mode = False
 
