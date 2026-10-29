@@ -10,6 +10,7 @@ from core.session import Session
 
 class MARAWorker(QThread):
     sig_event = pyqtSignal(object)
+    sig_capture = pyqtSignal(bool)
 
     def __init__(self, session: Session | None = None, listener=None):
         super().__init__()

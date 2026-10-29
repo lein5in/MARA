@@ -32,6 +32,7 @@ class ToolFinished:
     ok: bool
     duration: float
     summary: str
+    label: str = ""
 
 
 @dataclass

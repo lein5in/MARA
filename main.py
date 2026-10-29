@@ -25,6 +25,7 @@ def main():
     from core.ui.worker import MARAWorker
     from core.orb import MARAOrb
     from core import listener, shutdown
+    from core.tools import vision_tools
 
     theme.load_fonts()
     app.setStyleSheet(theme.build_qss())
@@ -49,7 +50,22 @@ def main():
         elif isinstance(event, ev.QuitRequested):
             app.quit()
 
+    hidden_for_capture = []
+
+    def on_capture(hide: bool):
+        if hide:
+            hidden_for_capture[:] = [w for w in (window, orb, visual) if w.isVisible()]
+            for w in hidden_for_capture:
+                w.hide()
+        else:
+            for w in hidden_for_capture:
+                w.show()
+            hidden_for_capture.clear()
+        app.processEvents()
+
     worker.sig_event.connect(on_event)
+    worker.sig_capture.connect(on_capture, Qt.BlockingQueuedConnection)
+    vision_tools.set_capture_hook(worker.sig_capture.emit)
     window.send_text.connect(worker.submit)
     window.confirm.connect(worker.confirm)
     window.new_conversation.connect(worker.new_conversation)

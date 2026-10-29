@@ -166,6 +166,18 @@ def take_screenshot(filename: str | None = None) -> str:
     log.info(f"[System] Screenshot saved: {filepath}")
     return str(filepath)
 
+def active_monitor_rect() -> tuple[tuple[int, int, int, int], bool]:
+    import win32api
+    monitor = win32api.MonitorFromPoint(win32api.GetCursorPos(), 2)
+    info = win32api.GetMonitorInfo(monitor)
+    return tuple(info["Monitor"]), bool(info.get("Flags", 0) & 1)
+
+
+def grab_screen(bbox: tuple[int, int, int, int] | None):
+    from PIL import ImageGrab
+    return ImageGrab.grab(bbox=bbox, all_screens=True)
+
+
 def set_pause(until: datetime, memory):
     memory.set_pause(until.isoformat())
 

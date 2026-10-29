@@ -12,10 +12,10 @@ class ToolContext:
 
 
 def build_registry() -> Registry:
-    from core.tools import system_tools, app_tools, browser_tools, memory_tools, ui_tools
+    from core.tools import system_tools, app_tools, browser_tools, memory_tools, ui_tools, vision_tools
 
     reg = Registry()
-    for module in (system_tools, app_tools, browser_tools, memory_tools, ui_tools):
+    for module in (system_tools, app_tools, browser_tools, memory_tools, ui_tools, vision_tools):
         module.register(reg)
     return reg
 

@@ -168,6 +168,21 @@ class UserBlock(QWidget):
         self.text.set_inner(inner or "&nbsp;")
 
 
+class ScreenThumb(QFrame):
+    def __init__(self):
+        super().__init__()
+        self.setObjectName("ScreenThumb")
+        self.setFixedSize(44, 28)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(6, 5, 6, 5)
+        lay.setSpacing(3)
+        for width, accent in ((0.7, False), (0.45, False), (0.6, True), (0.35, False)):
+            bar = QFrame()
+            bar.setObjectName("ThumbLineAccent" if accent else "ThumbLine")
+            bar.setFixedSize(int(30 * width), 2)
+            lay.addWidget(bar)
+
+
 class ReceiptRow(QWidget):
     def __init__(self, name: str, args: str):
         super().__init__()
@@ -178,7 +193,10 @@ class ReceiptRow(QWidget):
         self.args.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.args.setToolTip(args)
         self.time = label("", "ReceiptTime", theme.mono(12))
-        lay = hbox(self.icon, self.name, self.args, self.time, spacing=10, margins=(14, 9, 14, 9))
+        items = [self.icon, self.name, self.args]
+        if name == "look_at_screen":
+            items.append(ScreenThumb())
+        lay = hbox(*items, self.time, spacing=10, margins=(14, 9, 14, 9))
         lay.setStretch(2, 1)
         self.setLayout(lay)
         self.set_running()
@@ -186,7 +204,9 @@ class ReceiptRow(QWidget):
     def set_running(self):
         self.icon.setPixmap(theme.icon_pixmap("dots", C["dim"], 14, 2.6))
 
-    def set_finished(self, ok: bool, duration: float, summary: str = ""):
+    def set_finished(self, ok: bool, duration: float, summary: str = "", label_text: str = ""):
+        if label_text:
+            self.args.setText(label_text)
         self.icon.setPixmap(theme.icon_pixmap("check" if ok else "cross", C["accent"] if ok else C["removed"], 14, 2.2))
         self.name.setProperty("failed", not ok)
         self.name.style().unpolish(self.name)
@@ -217,10 +237,10 @@ class Receipts(QFrame):
         self._lay.addWidget(row)
         self.show()
 
-    def finish(self, tid: str, name: str, ok: bool, duration: float, summary: str):
+    def finish(self, tid: str, name: str, ok: bool, duration: float, summary: str, label_text: str = ""):
         if tid not in self.rows:
             self.start(tid, name, "")
-        self.rows[tid].set_finished(ok, duration, summary)
+        self.rows[tid].set_finished(ok, duration, summary, label_text)
 
     def drop(self, tid: str):
         row = self.rows.pop(tid, None)

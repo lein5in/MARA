@@ -15,7 +15,7 @@ _CLOSERS = "\"'”’»)]"
 
 def clean_text(text: str) -> str:
     text = re.sub(r"```.*?(```|$)", " Check the code on screen. ", text, flags=re.DOTALL)
-    text = re.sub(r"`([^`]*)`", r"\1", text)
+    text = re.sub(r"`([^`]*)`", r"\1", text).replace("`", "")
     text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
     text = re.sub(r"(?<!\w)\*(?!\s)(.+?)(?<!\s)\*(?!\w)", r"\1", text)
     text = re.sub(r"(?<!\w)__(.+?)__(?!\w)", r"\1", text)
@@ -210,6 +210,30 @@ def copyable_code(code: str, diff: bool) -> str:
     if not diff:
         return code
     return "\n".join(content for _, marker, content in code_lines(code, True) if marker != "-")
+
+
+class SpokenFilter:
+    def __init__(self):
+        self.in_code = False
+        self._ticks = ""
+
+    def feed(self, delta: str) -> str:
+        out = []
+        for ch in delta:
+            if ch == "`":
+                self._ticks += ch
+                if len(self._ticks) == 3:
+                    self.in_code = not self.in_code
+                    self._ticks = ""
+                    out.append(" ")
+                continue
+            if self._ticks:
+                if not self.in_code:
+                    out.append(self._ticks)
+                self._ticks = ""
+            if not self.in_code:
+                out.append(ch)
+        return "".join(out)
 
 
 def pcm16_from_wav(data: bytes, header_size: int = 44) -> bytes:

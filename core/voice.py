@@ -6,7 +6,7 @@ import sounddevice as sd
 from fishaudio import FishAudio
 from fishaudio.types import TTSConfig, FlushEvent
 from core import system, metrics
-from core.text import clean_text, pcm16_from_wav, SentenceBuffer
+from core.text import clean_text, pcm16_from_wav, SentenceBuffer, SpokenFilter
 from core.config import (
     FISH_API_KEY, VOICE_ID, TTS_SAMPLE_RATE as SAMPLE_RATE, TTS_CHANNELS as CHANNELS, MIN_WORDS_SOFT,
     STREAMING_TTS, PERSISTENT_AUDIO_OUT, TTS_FIRST_CHUNK_WORDS,
@@ -169,6 +169,7 @@ class _Speech:
     def __init__(self, out: AudioOut | None = None):
         self.out = out or audio_out()
         self._texts: queue.Queue = queue.Queue()
+        self._filter = SpokenFilter()
         self.cancelled = threading.Event()
         system.set_speaking(True)
         self._thread = threading.Thread(target=self._safe_run, daemon=True, name="mara-tts")
@@ -189,8 +190,11 @@ class _Speech:
                 log.exception("[Voice] speech failed")
 
     def feed(self, text: str):
-        if not self.cancelled.is_set():
-            self._texts.put(text)
+        if self.cancelled.is_set():
+            return
+        spoken = self._filter.feed(text)
+        if spoken:
+            self._texts.put(spoken)
 
     def end(self, timeout: float | None = None):
         self._texts.put(None)

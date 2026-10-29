@@ -372,7 +372,8 @@ class MainWindow(QWidget):
             block.finish()
             block.receipts.start(event.id, event.name, event.label)
         elif isinstance(event, ev.ToolFinished):
-            self._ensure_block().receipts.finish(event.id, event.name, event.ok, event.duration, event.summary)
+            self._ensure_block().receipts.finish(event.id, event.name, event.ok, event.duration, event.summary,
+                                                 event.label)
         elif isinstance(event, ev.ConfirmationRequested):
             card = self._ensure_block().add_confirmation(event.id, event.title, event.description, event.tool,
                                                          " ".join(f"{k}={v}" for k, v in event.args.items()))

@@ -18,6 +18,7 @@ class ToolResult:
     summary: str = ""
     duration: float = 0.0
     untrusted: bool = False
+    label: str = ""
 
 
 @dataclass

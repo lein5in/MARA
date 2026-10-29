@@ -130,6 +130,9 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: tran
 #ReceiptSep {{ background: {C['row_sep']}; }}
 #ReceiptName {{ color: {C['secondary']}; font-family: {m}; }}
 #ReceiptArgs, #ReceiptTime {{ color: {C['dim']}; font-family: {m}; }}
+#ScreenThumb {{ border: 1px solid {C['control_strong']}; border-radius: 3px; background: {C['ground']}; }}
+#ThumbLine {{ background: {C['control_strong']}; }}
+#ThumbLineAccent {{ background: {C['accent']}; }}
 #ReceiptName[failed="true"] {{ color: {C['removed_text']}; }}
 #CodeBlock {{ background: {C['panel']}; border: 1px solid {C['hairline']}; border-radius: 6px; }}
 #CodeHeader {{ background: {C['composer']}; border: none; border-bottom: 1px solid {C['hairline']};
