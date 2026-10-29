@@ -4,11 +4,11 @@ from concurrent.futures import Future, TimeoutError as FutureTimeout
 from datetime import datetime
 
 from anthropic import Anthropic
-from memory.memory import Memory
+from memory.memory import Memory, worth_extracting
 from core.config import (
     ANTHROPIC_API_KEY, USER_NAME, MODEL_MAIN, MODEL_FAST, PROFILE_PATH, PROFILE_EXAMPLE_PATH,
     MAX_HISTORY_TURNS, MAX_TOOL_ITERATIONS, MAX_TOKENS, API_TIMEOUT, API_MAX_RETRIES, CONFIRM_TIMEOUT,
-    PROMPT_CACHE, MAX_HISTORY_IMAGES,
+    PROMPT_CACHE, MAX_HISTORY_IMAGES, UNTRUSTED_TURNS,
 )
 from core import system
 from core.events import (
@@ -16,7 +16,7 @@ from core.events import (
     StateChanged, State, Error, Done,
 )
 from core.storage import copy_if_missing
-from core.tools import ToolContext, ToolResult, build_registry, CONFIRM
+from core.tools import ToolContext, ToolResult, build_registry, CONFIRM, LOCAL
 from core.log import get_logger
 log = get_logger(__name__)
 startup_log = get_logger("startup")
@@ -150,6 +150,16 @@ class ConfirmationBroker:
                 f.set_result(False)
 
 
+SECRET_KEYS = {"password", "passwd", "pwd", "secret", "token", "api_key"}
+UNTRUSTED_TITLE = "Confirm action"
+UNTRUSTED_DESCRIPTION = ("This was requested right after MARA read a web page or your screen, which could contain "
+                         "hidden instructions. Confirm only if you asked for it.")
+
+
+def redact(args: dict) -> dict:
+    return {k: ("[redacted]" if k.lower() in SECRET_KEYS else v) for k, v in (args or {}).items()}
+
+
 def _block_to_dict(block) -> dict | None:
     kind = getattr(block, "type", None) or (block.get("type") if isinstance(block, dict) else None)
     get = (lambda k, d=None: block.get(k, d)) if isinstance(block, dict) else (lambda k, d=None: getattr(block, k, d))
@@ -157,7 +167,7 @@ def _block_to_dict(block) -> dict | None:
         text = get("text", "")
         return {"type": "text", "text": text} if text and text.strip() else None
     if kind == "tool_use":
-        return {"type": "tool_use", "id": get("id"), "name": get("name"), "input": get("input") or {}}
+        return {"type": "tool_use", "id": get("id"), "name": get("name"), "input": redact(get("input") or {})}
     return None
 
 
@@ -269,6 +279,7 @@ class Agent:
         self._lock = threading.Lock()
         self._reset_requested = False
         self._cancel = threading.Event()
+        self.untrusted_turns = 0
         self.ctx = ToolContext(emit=self._emit, agent=self, memory=self.memory)
 
     def _emit(self, event):
@@ -284,6 +295,7 @@ class Agent:
         with self._lock:
             self.history = []
             self._reset_requested = False
+            self.untrusted_turns = 0
         log.info("[Session] History cleared.")
 
     def cancel(self):
@@ -353,12 +365,17 @@ class Agent:
         return final
 
     def _needs_confirmation(self, tool) -> bool:
-        return tool is not None and tool.risk == CONFIRM
+        if tool is None:
+            return False
+        return tool.risk == CONFIRM or (tool.risk == LOCAL and self.untrusted_turns > 0)
 
     def _confirm(self, tool, args: dict, cid: str) -> bool:
         if self.broker is None:
             return False
-        title, description = tool.confirmation(args)
+        if tool.risk == CONFIRM:
+            title, description = tool.confirmation(args)
+        else:
+            title, description = UNTRUSTED_TITLE, UNTRUSTED_DESCRIPTION
         future = self.broker.open(cid)
         self._emit(StateChanged(State.WAITING_CONFIRMATION))
         self._emit(ConfirmationRequested(cid, title, description, tool.name, args))
@@ -380,6 +397,8 @@ class Agent:
             result = ToolResult(False, "Cancelled by the user. Do not retry; acknowledge briefly.", "cancelled")
         else:
             result = self.registry.execute(name, args, self.ctx)
+        if result.untrusted:
+            self.untrusted_turns = UNTRUSTED_TURNS
         log.info(f"[Tool] {name} ok={result.ok} {result.duration:.2f}s")
         self._emit(ToolFinished(tid, name, result.ok, result.duration, result.summary, result.label))
         content = result.content if result.content not in (None, "", []) else "Done."
@@ -447,9 +466,10 @@ class Agent:
             self._close_turn(turn, state["partial"], "error")
             self._emit(Error(describe_error(e)))
         self._commit(turn)
+        self.untrusted_turns = max(0, self.untrusted_turns - 1)
         reply = " ".join(spoken)
         self._emit(Done(reply))
-        if ok and self.background:
+        if ok and self.background and worth_extracting(user_text):
             threading.Thread(target=self._extract_and_save, args=(user_text,), daemon=True).start()
         return reply
 

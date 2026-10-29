@@ -6,7 +6,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import WebDriverException
-from memory.credentials import credentials
+from memory.credentials import get_credentials
 from core.config import BROWSER_TIMEOUT, CHROME_PROFILE_DIR
 from core.log import get_logger
 log = get_logger(__name__)
@@ -159,6 +159,7 @@ class BrowserController:
         config = SITE_CONFIGS.get(site.lower())
         if not config:
             return f"Unknown site: {site}. Supported: {', '.join(SITE_CONFIGS)}."
+        credentials = get_credentials()
         if not credentials.has_credentials(site):
             return f"No credentials stored for {site}. Ask the user to save them first."
 
@@ -176,11 +177,8 @@ class BrowserController:
                 time.sleep(step.get("seconds", 1))
         return f"Logged into {site}."
 
-    def save_credential(self, site: str, email: str, password: str) -> str:
-        return credentials.save(site, email, password)
-
     def delete_credential(self, site: str) -> str:
-        return credentials.delete(site)
+        return get_credentials().delete(site)
 
 
 browser = BrowserController()

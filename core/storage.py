@@ -29,13 +29,14 @@ def _copy_atomic(src: Path, dst: Path):
     log.info(f"[Data] Migrated {src.name} -> {dst}")
 
 
-def migrate_legacy_data(data_dir: Path, key: tuple[Path, Path], encrypted: list[tuple[Path, Path]], plain: list[tuple[Path, Path]]):
+def migrate_legacy_data(data_dir: Path, key: tuple[Path, Path] | None, encrypted: list[tuple[Path, Path]], plain: list[tuple[Path, Path]]):
     """Copy (never move) legacy files into data_dir. Each pair is (legacy, new).
-    Encrypted files are only copied together with the key, enc files first and key last."""
+    Encrypted files are only copied together with the key, enc files first and key last.
+    key is None once the key is protected by DPAPI: the legacy plaintext copy must not come back."""
     data_dir.mkdir(parents=True, exist_ok=True)
 
-    key_old, key_new = key
-    if key_old.exists() and not key_new.exists():
+    key_old, key_new = key if key is not None else (None, None)
+    if key_old is not None and key_old.exists() and not key_new.exists():
         pending = [(o, n) for o, n in encrypted if o.exists() and not n.exists()]
         try:
             for old, new in pending:

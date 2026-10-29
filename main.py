@@ -1,4 +1,5 @@
 import sys
+import threading
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWebEngineWidgets import QWebEngineView  # noqa: F401
@@ -13,7 +14,13 @@ log = get_logger(__name__)
 startup_log = get_logger("startup")
 
 
+def _log_unhandled(exc_type, exc, tb):
+    log.critical("Unhandled exception", exc_info=(exc_type, exc, tb))
+
+
 def main():
+    sys.excepthook = _log_unhandled
+    threading.excepthook = lambda args: _log_unhandled(args.exc_type, args.exc_value, args.exc_traceback)
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps)
     app = QApplication(sys.argv)
@@ -25,7 +32,8 @@ def main():
     from core.ui.worker import MARAWorker
     from core.orb import MARAOrb
     from core import listener, shutdown
-    from core.tools import vision_tools
+    from core.tools import vision_tools, browser_tools
+    from core.ui.secret import ask_password
 
     theme.load_fonts()
     app.setStyleSheet(theme.build_qss())
@@ -66,6 +74,12 @@ def main():
     worker.sig_event.connect(on_event)
     worker.sig_capture.connect(on_capture, Qt.BlockingQueuedConnection)
     vision_tools.set_capture_hook(worker.sig_capture.emit)
+
+    def on_secret(site: str, email: str):
+        worker.secret_result = ask_password(site, email, window if window.isVisible() else None)
+
+    worker.sig_secret.connect(on_secret, Qt.BlockingQueuedConnection)
+    browser_tools.set_secret_prompt(worker.ask_secret)
     window.send_text.connect(worker.submit)
     window.confirm.connect(worker.confirm)
     window.new_conversation.connect(worker.new_conversation)

@@ -11,6 +11,7 @@ from core.session import Session
 class MARAWorker(QThread):
     sig_event = pyqtSignal(object)
     sig_capture = pyqtSignal(bool)
+    sig_secret = pyqtSignal(str, str)
 
     def __init__(self, session: Session | None = None, listener=None):
         super().__init__()
@@ -19,6 +20,12 @@ class MARAWorker(QThread):
         if listener is not None:
             listener.set_event_hook(self.sig_event.emit)
             listener.set_barge_in(self.session.barge_in)
+
+    def ask_secret(self, site: str, email: str) -> str | None:
+        self.secret_result = None
+        self.sig_secret.emit(site, email)
+        value, self.secret_result = self.secret_result, None
+        return value
 
     def submit(self, text: str):
         self.session.submit(text, "typed")

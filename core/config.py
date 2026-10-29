@@ -17,6 +17,9 @@ MODEL_MAIN = "claude-sonnet-5"
 MODEL_LABEL = "sonnet 5"
 MODEL_FAST = "claude-haiku-4-5-20251001"
 
+MEMORY_CAPS = {"facts": 60, "preferences": 40, "context": 20}
+UNTRUSTED_TURNS = 2
+
 MAX_HISTORY_TURNS = 12
 MAX_HISTORY_IMAGES = 2
 VISION_MAX_SIDE = 1568
@@ -68,6 +71,7 @@ LOCAL_DIR = DATA_DIR / "local" if _DATA_OVERRIDE else Path(os.environ.get("LOCAL
 CHROME_PROFILE_DIR = LOCAL_DIR / "ChromeProfile"
 REGISTRY_PATH = DATA_DIR / "app_registry.json"
 KEY_PATH = DATA_DIR / "mara.key"
+KEY_PROTECTED_PATH = DATA_DIR / "mara.key.dpapi"
 MEMORY_PATH = DATA_DIR / "mara_memory.enc"
 CREDENTIALS_PATH = DATA_DIR / "mara_credentials.enc"
 PROFILE_PATH = DATA_DIR / "profile.md"
@@ -79,7 +83,7 @@ if _DATA_OVERRIDE:
 else:
     migrate_legacy_data(
         DATA_DIR,
-        key=(_LEGACY_MEMORY_DIR / "mara.key", KEY_PATH),
+        key=None if KEY_PROTECTED_PATH.exists() else (_LEGACY_MEMORY_DIR / "mara.key", KEY_PATH),
         encrypted=[
             (_LEGACY_MEMORY_DIR / "mara_memory.enc", MEMORY_PATH),
             (_LEGACY_MEMORY_DIR / "mara_credentials.enc", CREDENTIALS_PATH),

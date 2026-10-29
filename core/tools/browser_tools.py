@@ -1,7 +1,14 @@
 from core.config import BROWSER_TIMEOUT
 from core.tools.registry import Registry, ToolError, READ, LOCAL, CONFIRM
+from memory.credentials import get_credentials
 
 _BY = {"type": "string", "enum": ["css", "xpath", "id", "text", "name"], "description": "Selector type, default css."}
+_secret_prompt = None
+
+
+def set_secret_prompt(fn):
+    global _secret_prompt
+    _secret_prompt = fn
 
 
 def _browser():
@@ -72,13 +79,21 @@ def register(reg: Registry):
     def browser_login(ctx, site):
         return _safe(_browser().login, site)
 
-    @reg.tool("browser_save_credentials", "Store the email and password for a site in the encrypted vault.",
-              {"site": {"type": "string"}, "email": {"type": "string"}, "password": {"type": "string"}},
-              ["site", "email", "password"], LOCAL, summarize=lambda a: f"site={a.get('site', '')}")
-    def browser_save_credentials(ctx, site, email, password):
-        if not site or not email or not password:
-            raise ToolError("site, email and password are required")
-        return _browser().save_credential(site, email, password)
+    @reg.tool("browser_save_credentials",
+              "Save login credentials for a site. Pass the site and the email/username only: the user types the "
+              "password in a private local dialog that you never see. Never ask for a password in the chat.",
+              {"site": {"type": "string"}, "email": {"type": "string"}},
+              ["site", "email"], LOCAL, summarize=lambda a: f"site={a.get('site', '')}")
+    def browser_save_credentials(ctx, site, email, **ignored):
+        if not site or not email:
+            raise ToolError("site and email are required")
+        if _secret_prompt is None:
+            raise ToolError("no local password dialog is available here")
+        password = _secret_prompt(site, email)
+        if not password:
+            return "The user cancelled the password dialog. Nothing was saved."
+        get_credentials().save(site, email, password)
+        return f"Saved credentials for {site}."
 
     @reg.tool("browser_delete_credentials", "Delete the stored credentials for a site.",
               {"site": {"type": "string"}}, ["site"], CONFIRM,
@@ -86,4 +101,4 @@ def register(reg: Registry):
                                       "Removes the stored email and password for this site from MARA's encrypted vault. "
                                       "This cannot be undone."))
     def browser_delete_credentials(ctx, site):
-        return _browser().delete_credential(site)
+        return get_credentials().delete(site)

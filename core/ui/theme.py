@@ -178,6 +178,10 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: tran
 #Hint {{ color: {C['dim']}; font-family: {m}; }}
 #KeyCap {{ border: 1px solid {C['control_strong']}; border-radius: 4px; color: {C['secondary']}; font-family: {m}; padding: 0 7px; }}
 #KeyCap[active="true"] {{ border: 1px solid {C['accent']}; color: {C['text']}; }}
+#SecretDialog {{ background: {C['ground']}; }}
+#SecretInput {{ background: {C['composer']}; border: 1px solid {C['control']}; border-radius: 6px; color: {C['text']};
+    padding: 0 10px; font-family: {m}; }}
+#SecretInput:focus {{ border: 1px solid {C['accent']}; }}
 #VisualRoot {{ background: {C['ground']}; border: 1px solid {C['hairline']}; border-radius: 12px; }}
 #VisualTitle {{ color: {C['secondary']}; font-family: {m}; }}
 QMenu {{ background: {C['surface']}; color: {C['text']}; border: 1px solid {C['hairline']}; font-family: {m}; padding: 4px; }}

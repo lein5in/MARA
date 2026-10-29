@@ -1,61 +1,42 @@
 import json
+import threading
+
 from cryptography.fernet import Fernet
-from core.config import KEY_PATH, CREDENTIALS_PATH
+
+from core.config import CREDENTIALS_PATH
 from core.storage import atomic_write_bytes
 from core.log import get_logger
 log = get_logger(__name__)
 
 
-
-
-
-
 class CredentialsManager:
-    """
-    Stockage chiffré des identifiants MARA.
-    Même approche que la mémoire — Fernet AES local, jamais en clair.
-    Structure : { "gmail": {"email": "...", "password": "..."}, ... }
-    """
-
-    def __init__(self):
-        self._key  = self._load_or_create_key()
-        self._fernet = Fernet(self._key)
+    def __init__(self, path=CREDENTIALS_PATH, fernet: Fernet | None = None):
+        if fernet is None:
+            from memory.keystore import get_key
+            fernet = Fernet(get_key())
+        self._path = path
+        self._fernet = fernet
+        self._lock = threading.Lock()
         self._data = self._load()
 
-     
-
-    def _load_or_create_key(self) -> bytes:
-        if KEY_PATH.exists():
-            return KEY_PATH.read_bytes()
-        key = Fernet.generate_key()
-        atomic_write_bytes(KEY_PATH, key)
-        log.info("[Credentials] Clé générée.")
-        return key
-
-
     def _load(self) -> dict:
-        if not CREDENTIALS_PATH.exists():
+        if not self._path.exists():
             return {}
         try:
-            encrypted = CREDENTIALS_PATH.read_bytes()
-            decrypted = self._fernet.decrypt(encrypted)
-            return json.loads(decrypted.decode())
+            return json.loads(self._fernet.decrypt(self._path.read_bytes()).decode())
         except Exception as e:
-            log.error(f"[Credentials] Erreur chargement : {e}")
+            log.error(f"[Credentials] Could not read the vault: {type(e).__name__}")
             return {}
 
     def _save(self):
         raw = json.dumps(self._data, ensure_ascii=False).encode()
-        encrypted = self._fernet.encrypt(raw)
-        atomic_write_bytes(CREDENTIALS_PATH, encrypted)
-
-    
+        atomic_write_bytes(self._path, self._fernet.encrypt(raw))
 
     def save(self, site: str, email: str, password: str) -> str:
-        """Sauvegarde les identifiants d'un site."""
-        self._data[site.lower()] = {"email": email, "password": password}
-        self._save()
-        log.info(f"[Credentials] Sauvegardé : {site}")
+        with self._lock:
+            self._data[site.lower()] = {"email": email, "password": password}
+            self._save()
+        log.info(f"[Credentials] Saved credentials for {site}")
         return f"Credentials for {site} saved securely."
 
     def get_email(self, site: str) -> str | None:
@@ -65,20 +46,24 @@ class CredentialsManager:
         return self._data.get(site.lower(), {}).get("password")
 
     def delete(self, site: str) -> str:
-        """Supprime les identifiants d'un site."""
-        if site.lower() in self._data:
+        with self._lock:
+            if site.lower() not in self._data:
+                return f"No credentials found for {site}."
             del self._data[site.lower()]
             self._save()
-            return f"Credentials for {site} deleted."
-        return f"No credentials found for {site}."
-
-    def list_sites(self) -> list[str]:
-        """Retourne la liste des sites avec des identifiants stockés."""
-        return list(self._data.keys())
+        return f"Credentials for {site} deleted."
 
     def has_credentials(self, site: str) -> bool:
         return site.lower() in self._data
 
 
+_instance: CredentialsManager | None = None
+_instance_lock = threading.Lock()
 
-credentials = CredentialsManager()
+
+def get_credentials() -> CredentialsManager:
+    global _instance
+    with _instance_lock:
+        if _instance is None:
+            _instance = CredentialsManager()
+    return _instance

@@ -39,7 +39,9 @@ Agent loop: stream Sonnet ─ TextDelta ─> Session ─> SpeechStream (TTS) + e
 - `core/listener.py` publishes `StateChanged(LISTENING)`, `MicLevel` and partial `UserTranscript` through `set_event_hook`.
 - `core/system.py` (OS calls, silent/vision flags, pause state), `core/browser.py` (Selenium Chrome, isolated profile), `core/app_registry.py`, `core/text.py` (pure text helpers: `clean_text`, sentence splitting, yes/no parsing).
 
-**Memory** (`memory/`): `Memory` is a Singleton storing Fernet-encrypted JSON (facts and preferences, surfaced into the system prompt by `Agent.system_prompt`); `credentials.py` is a separate encrypted store for browser logins. The prompt tells the model to use memory implicitly and never recite it.
+**Memory** (`memory/`): `MemoryStore` holds Fernet-encrypted JSON (facts, preferences, context, each with a timestamp, capped by `MEMORY_CAPS`, near-duplicates merged, corrupt files copied to `*.corrupt`); `Memory` is its singleton on the real file. `credentials.py` is the browser-login vault (passwords only come from the local `SecretDialog`, never from the model). `keystore.py` keeps the Fernet key protected by Windows DPAPI (`mara.key.dpapi`) and migrates a plaintext `mara.key` to it once, keeping `mara.key.bak`.
+
+**Security**: tools have a risk level. `confirm` always asks; `local` asks too while untrusted content (web page text, screenshots) was read in the current or previous turn (`UNTRUSTED_TURNS`); `read` never asks.
 
 ## Conventions
 
