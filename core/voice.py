@@ -15,6 +15,7 @@ from core.log import get_logger
 log = get_logger(__name__)
 
 _client = None
+WRITE_BYTES = SAMPLE_RATE // 10 * 2 * CHANNELS
 
 
 def _get_client():
@@ -39,6 +40,7 @@ class AudioOut:
         self._stream = None
         self._lock = threading.Lock()
         self._generation = 0
+        self._pending = 0
         self._closed = False
         self._thread = threading.Thread(target=self._run, daemon=True, name="mara-audio-out")
         self._thread.start()
@@ -64,25 +66,26 @@ class AudioOut:
             if item is None:
                 break
             generation, pcm = item
-            if generation != self._generation:
-                self._mark_idle_if_empty()
-                continue
-            try:
-                with self._lock:
-                    stream = self._open()
-                metrics.mark("first_audio")
-                stream.write(np.frombuffer(pcm, dtype=np.int16))
-            except Exception:
-                log.exception("[Audio] playback failed")
-            self._mark_idle_if_empty()
+            if generation == self._generation:
+                try:
+                    with self._lock:
+                        stream = self._open()
+                        metrics.mark("first_audio")
+                        stream.write(np.frombuffer(pcm, dtype=np.int16))
+                except Exception as e:
+                    log.warning(f"[Audio] playback failed: {e}")
+            self._done_one()
         with self._lock:
             self._release()
 
-    def _mark_idle_if_empty(self):
-        if self._queue.empty():
-            if not self.persistent:
-                with self._lock:
-                    self._release()
+    def _done_one(self):
+        with self._lock:
+            self._pending = max(0, self._pending - 1)
+            idle = self._pending == 0
+            if idle and not self.persistent:
+                self._release()
+        if idle:
+            system.set_speaking(False)
             self._idle.set()
 
     def write(self, pcm: bytes):
@@ -90,12 +93,17 @@ class AudioOut:
             pcm = pcm[:-1]
         if not pcm or self._closed:
             return
-        self._idle.clear()
-        self._queue.put((self._generation, pcm))
+        pieces = [pcm[i:i + WRITE_BYTES] for i in range(0, len(pcm), WRITE_BYTES)]
+        with self._lock:
+            self._pending += len(pieces)
+            self._idle.clear()
+            system.set_speaking(True)
+            for piece in pieces:
+                self._queue.put((self._generation, piece))
 
     def clear(self):
-        self._generation += 1
         with self._lock:
+            self._generation += 1
             if self._stream is not None:
                 try:
                     self._stream.abort()
@@ -103,8 +111,6 @@ class AudioOut:
                 except Exception as e:
                     log.debug(f"[Audio] abort failed: {e}")
                     self._release()
-        if self._queue.empty():
-            self._idle.set()
 
     def wait_idle(self, timeout: float | None = None) -> bool:
         return self._idle.wait(timeout)
@@ -171,7 +177,7 @@ class _Speech:
         self._texts: queue.Queue = queue.Queue()
         self._filter = SpokenFilter()
         self.cancelled = threading.Event()
-        system.set_speaking(True)
+        self.failed = None
         self._thread = threading.Thread(target=self._safe_run, daemon=True, name="mara-tts")
         self._thread.start()
 
@@ -185,9 +191,10 @@ class _Speech:
     def _safe_run(self):
         try:
             self._run()
-        except Exception:
+        except Exception as e:
             if not self.cancelled.is_set():
                 log.exception("[Voice] speech failed")
+                self.failed = f"Voice output failed ({type(e).__name__}). Replies are still shown here."
 
     def feed(self, text: str):
         if self.cancelled.is_set():
@@ -199,15 +206,14 @@ class _Speech:
     def end(self, timeout: float | None = None):
         self._texts.put(None)
         self._thread.join(timeout)
-        if not self.cancelled.is_set():
-            self.out.wait_idle(timeout)
-        system.set_speaking(False)
+        if self._thread.is_alive() or (not self.cancelled.is_set() and not self.out.wait_idle(timeout)):
+            log.warning("[Voice] speech did not finish in time, cancelling it")
+            self.cancel()
 
     def cancel(self):
         self.cancelled.set()
         self._texts.put(None)
         self.out.clear()
-        system.set_speaking(False)
 
 
 class SentenceSpeech(_Speech):
@@ -225,8 +231,9 @@ class SentenceSpeech(_Speech):
             return
         try:
             _synthesize_sentence(sentence, self.out.write, self.cancelled)
-        except Exception:
+        except Exception as e:
             log.exception("[Voice] Synthesis error")
+            self.failed = f"Voice output failed ({type(e).__name__}). Replies are still shown here."
 
 
 class StreamingSpeech(_Speech):
@@ -265,6 +272,8 @@ def make_speech() -> _Speech:
 
 
 class SilentSpeech:
+    failed = None
+
     def feed(self, text):
         pass
 

@@ -1,17 +1,20 @@
 import queue
 import threading
+import time
 
 from core import system, metrics
 from core.brain import Agent, ConfirmationBroker
 from core.config import TRIGGER_KEY
 from core.events import (
     TextDelta, ToolStarted, StateChanged, State, QuitRequested, TurnStarted, ConfirmationRequested, Error, Notice,
+    UserTranscript,
 )
 from core.text import parse_yes_no, has_word
 from core.log import get_logger
 log = get_logger(__name__)
 
 WAKE_WORD = "mara"
+SPEECH_END_TIMEOUT = 180.0
 
 OFFLINE = {
     "fr": f"Je suis en pause. Maintiens {TRIGGER_KEY.upper()} et dis mon nom pour me réveiller.",
@@ -19,11 +22,7 @@ OFFLINE = {
     "ar": f"أنا في وضع الإيقاف المؤقت. اضغط {TRIGGER_KEY.upper()} وقل اسمي لإيقاظي.",
 }
 BACK = {"fr": "Je suis de retour.", "en": "I'm back.", "ar": "لقد عدت."}
-CONFIRM_HINT = {
-    "fr": "Dis oui ou annule.",
-    "en": "Say yes or cancel.",
-    "ar": "قل نعم أو إلغاء.",
-}
+CONFIRM_HINT = "Waiting for your confirmation: say yes or cancel, or use the buttons."
 
 
 def localized(table: dict, lang: str | None = None) -> str:
@@ -78,9 +77,12 @@ class Session:
         if not text:
             return False
         if self.broker.pending_id():
+            if source == "voice":
+                self.emit(UserTranscript("", final=True))
             answer = parse_yes_no(text)
             if answer is None:
-                self.emit(Error(localized(CONFIRM_HINT)))
+                self.emit(Error(CONFIRM_HINT))
+                self.emit(StateChanged(State.WAITING_CONFIRMATION))
                 return False
             self.broker.resolve(answer)
             return True
@@ -91,6 +93,7 @@ class Session:
         return self.broker.resolve(accepted, cid)
 
     def new_conversation(self):
+        self.broker.cancel_all()
         if self.busy:
             self.agent.request_reset()
         else:
@@ -105,6 +108,9 @@ class Session:
     def barge_in(self):
         if not self.busy and isinstance(self._speech, NullSpeech):
             return False
+        if self.broker.pending_id():
+            self._speech.cancel()
+            return True
         log.info("[Session] Barge-in: stopping speech and the current request.")
         self._barged = True
         self._speech.cancel()
@@ -124,17 +130,40 @@ class Session:
                 self.emit(StateChanged(State.SPEAKING))
         elif isinstance(event, (ToolStarted, ConfirmationRequested)) and self._speaking:
             self._speaking = False
+            if isinstance(event, ToolStarted):
+                self.emit(StateChanged(State.THINKING))
         self.emit(event)
+
+    def rest_state(self) -> State:
+        if self.broker.pending_id():
+            return State.WAITING_CONFIRMATION
+        return State.PAUSED if system.is_paused(self.memory) else State.IDLE
+
+    def _after_empty_recording(self):
+        for _ in range(40):
+            if not self.busy or self.broker.pending_id():
+                break
+            time.sleep(0.05)
+        if not self.busy or self.broker.pending_id():
+            self.emit(StateChanged(self.rest_state()))
 
     def _voice_loop(self):
         while self.running:
             try:
                 text = self.listen_fn()
-            except Exception:
+            except Exception as e:
                 log.exception("[Session] listener failed")
+                self.emit(UserTranscript("", final=True))
+                self.emit(Error(f"Voice input failed ({type(e).__name__}). You can still type."))
+                self._after_empty_recording()
+                time.sleep(1.0)
                 continue
-            if text and self.running:
+            if not self.running:
+                break
+            if text:
                 self.submit(text, "voice")
+            else:
+                self._after_empty_recording()
 
     def start_listening(self):
         if self.listen_fn:
@@ -152,10 +181,13 @@ class Session:
             self.agent.run_turn(text, source)
         finally:
             self.busy = False
-            self._speech.end()
+            self._speech.end(SPEECH_END_TIMEOUT)
+            failed = getattr(self._speech, "failed", None)
             self._speech = NullSpeech()
             self._speaking = False
             metrics.finish()
+        if failed:
+            self.emit(Error(failed))
         if self._quit_pending:
             self.running = False
             self.emit(QuitRequested())
@@ -163,7 +195,7 @@ class Session:
         if self._barged:
             self._barged = False
             return
-        self.emit(StateChanged(State.PAUSED if system.is_paused(self.memory) else State.IDLE))
+        self.emit(StateChanged(self.rest_state()))
 
     def _say(self, text: str):
         self.emit(StateChanged(State.SPEAKING))

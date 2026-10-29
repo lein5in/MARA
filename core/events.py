@@ -1,6 +1,5 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any
 
 
 class State(str, Enum):
@@ -118,11 +117,3 @@ class UserTranscript:
 class MicLevel:
     level: float
     elapsed: float = 0.0
-
-
-@dataclass
-class TurnRecap:
-    timings: dict = field(default_factory=dict)
-
-
-Event = Any

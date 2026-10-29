@@ -160,14 +160,15 @@ def redact(args: dict) -> dict:
     return {k: ("[redacted]" if k.lower() in SECRET_KEYS else v) for k, v in (args or {}).items()}
 
 
-def _block_to_dict(block) -> dict | None:
+def _block_to_dict(block, hide_secrets: bool = True) -> dict | None:
     kind = getattr(block, "type", None) or (block.get("type") if isinstance(block, dict) else None)
     get = (lambda k, d=None: block.get(k, d)) if isinstance(block, dict) else (lambda k, d=None: getattr(block, k, d))
     if kind == "text":
         text = get("text", "")
         return {"type": "text", "text": text} if text and text.strip() else None
     if kind == "tool_use":
-        return {"type": "tool_use", "id": get("id"), "name": get("name"), "input": redact(get("input") or {})}
+        args = get("input") or {}
+        return {"type": "tool_use", "id": get("id"), "name": get("name"), "input": redact(args) if hide_secrets else args}
     return None
 
 
@@ -316,9 +317,6 @@ class Agent:
         parts.append(f"Current local time: {now.strftime('%A %d %B %Y, %H:%M')} (UTC{now.strftime('%z')}).")
         return "\n\n".join(parts)
 
-    def system_prompt(self) -> str:
-        return f"{BASE_SYSTEM_PROMPT}\n\n{self.dynamic_context()}"
-
     def system_blocks(self) -> list[dict]:
         static = {"type": "text", "text": BASE_SYSTEM_PROMPT}
         if PROMPT_CACHE:
@@ -391,9 +389,10 @@ class Agent:
 
     def _run_tool(self, block: dict) -> dict:
         name, args, tid = block["name"], block.get("input") or {}, block["id"]
+        shown = redact(args)
         tool = self.registry.get(name)
-        self._emit(ToolStarted(tid, name, args, tool.args_summary(args) if tool else ""))
-        if self._needs_confirmation(tool) and not self._confirm(tool, args, tid):
+        self._emit(ToolStarted(tid, name, shown, tool.args_summary(shown) if tool else ""))
+        if self._needs_confirmation(tool) and not self._confirm(tool, shown, tid):
             result = ToolResult(False, "Cancelled by the user. Do not retry; acknowledge briefly.", "cancelled")
         else:
             result = self.registry.execute(name, args, self.ctx)
@@ -445,7 +444,8 @@ class Agent:
                 if not blocks:
                     blocks = [{"type": "text", "text": "(no reply)"}]
                 turn.append({"role": "assistant", "content": blocks})
-                tool_uses = [b for b in blocks if b["type"] == "tool_use"]
+                tool_uses = [b for b in (_block_to_dict(x, hide_secrets=False) for x in final.content)
+                             if b and b["type"] == "tool_use"]
                 if not tool_uses:
                     break
                 if force_text or getattr(final, "stop_reason", "tool_use") != "tool_use":

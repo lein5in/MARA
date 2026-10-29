@@ -1,158 +1,153 @@
 # MARA — Personal AI Assistant
 ### Modular Adaptive Response Assistant
 
-> A fully local, voice-driven personal AI assistant inspired by JARVIS from Iron Man — built from scratch in Python, running 24/7 on a Windows laptop.
+> A voice-driven personal assistant for Windows, inspired by JARVIS: hold a mouse button, talk, and MARA answers out loud and acts on your PC.
 
 ---
 
 ## What is MARA?
 
-MARA is a personal AI assistant I designed and built over several months as a solo engineering project. The goal was simple: build something that actually feels like a real assistant — not a chatbot, not a demo, but a system that lives on your machine, knows who you are, and responds the moment you need it.
+MARA lives on your machine. You hold a button (F13, mapped to a mouse button), speak, and release. Whisper transcribes locally on the GPU, Claude Sonnet decides what to do with native tool calls (open apps, change the volume, read a web page, look at your screen, remember things), and Fish Audio speaks the answer while it is still being written. A terminal-style chat window shows the conversation, the actions MARA ran, and any code she suggests.
 
-You press a button on your mouse, you talk, she answers — vocally, intelligently, and instantly.
+## How it works
 
----
-
-## Architecture
-
-MARA runs on a hybrid local/cloud architecture designed for speed, privacy, and low cost.
-
-```
-Button press → Whisper (local GPU) → Claude Sonnet 5, full context + native tools
-                                              ↓
-                         Sonnet decides: plain reply, system action,
-                         or a tool call (visual, vision, memory, work mode...)
-                                              ↓
-                              Fish Audio TTS → real-time audio playback
-                                              ↓
-                              PyQt5 UI + 3D Neural Orb
-
-               [in parallel] Haiku → language detection only (~150ms)
+```mermaid
+flowchart LR
+    F13[Hold F13] --> Mic[Persistent mic + 300 ms pre-roll]
+    Mic --> Whisper[Whisper turbo, CUDA]
+    Typed[Typed message] --> Session
+    Whisper --> Session[Session: inputs, pause, confirmations]
+    Session --> Agent[Agent loop, Claude Sonnet]
+    Agent -- tool_use --> Tools[Tool registry: system, apps, browser, memory, vision, UI]
+    Tools -- tool_result --> Agent
+    Agent -- text deltas --> TTS[Fish Audio websocket, one per reply]
+    TTS --> Speaker[Persistent audio output]
+    Agent -- typed events --> UI[Qt window, orb, visual window]
 ```
 
-**The key insight:** routing is no longer guessed by a separate model reading your message in isolation. Sonnet — the model that already holds the full conversation — decides for itself, via native Anthropic tool-calling, whether to just reply, run a system action, or invoke a specific capability (generate a visual, look at the screen, touch memory, reset the conversation, etc). Haiku still runs in parallel, but only for lightweight language detection, so the perceived-latency gain is kept without the model ever misrouting a request based on a single out-of-context sentence.
-
----
+- **One conversation thread.** The history keeps the real `tool_use` / `tool_result` blocks, so "summarise what we did" works after an action, a visual or a screenshot.
+- **Agent loop.** Sonnet streams text; when it calls tools, they run, their results go back to Sonnet, and it continues (up to 8 rounds). Errors and network failures end the turn cleanly and are shown in the chat.
+- **Typed events** (`core/events.py`) are the only contract between the core and the interface. `python -m core.cli` drives the same agent from a terminal.
+- **Risk levels.** Every tool is `read`, `local` or `confirm`. Confirm tools (closing apps, deleting saved logins, erasing memory) show a confirmation card you answer by click or by saying yes / cancel. After MARA reads a web page or your screen, even `local` actions need confirmation for a while, so text hidden in a page cannot drive your PC.
 
 ## Features
 
-**Voice & Speech**
-- Push-to-talk trigger via a programmable mouse button (Logitech G502)
-- Local speech recognition with OpenAI Whisper turbo on CUDA
-- Real-time streaming TTS via Fish Audio S2 Pro, buffered by sentence for smoother delivery
-- Multilingual support — responds in the language you speak (EN/FR/AR)
+**Voice**: push-to-talk on F13, local Whisper (language detected by Whisper: English, French, Arabic), streaming Fish Audio TTS that starts on the first phrase, barge-in (press F13 while MARA talks to cut her off), silent mode.
 
-**Intelligence**
-- Powered by Claude Sonnet 5 for reasoning, conversation, and self-directed tool use
-- Native tool-calling for routing — Sonnet decides itself, with full conversation context, whether to answer normally or invoke a specific capability
-- Claude Haiku for lightweight, parallel language detection and silent background memory extraction
-- Persistent encrypted memory (facts, preferences, context) across sessions, surfaced naturally instead of recited
-- Conversation history management with automatic trimming
+**System**: launch and close apps (installed-app registry built at startup), open files, folders and URLs, file search (Windows Search index, bounded disk scan as fallback), type text and keyboard shortcuts, volume, mute, brightness, WiFi, the real time in any city, screenshots, pause ("leave me alone until 9 pm", wake her by saying "MARA"), work session (VS Code, Chrome, Edge).
 
-**System Control**
-- Launch and kill applications
-- Control volume and screen brightness
-- WiFi management
-- Real local clock — no guessed times or dates
-- Take screenshots
-- Type text (clipboard-based, fast and accent-safe) and trigger keyboard shortcuts in any window
-- Self-pause with automatic wake-up timer
-- Indexed file search via the native Windows Search index, with disk-scan fallback
+**Browser**: a dedicated Chrome profile driven by Selenium (navigate, click, type, read), logins for Gmail, Outlook and Brightspace from an encrypted vault. Passwords are typed in a local dialog and never reach the model.
 
-**Visual Output**
-- On request, MARA generates a chart, diagram, or table and renders it in a dedicated window
-- Built with Chart.js and inline SVG, dark-themed to match the rest of the interface
-- Distinguishes an explicit request to *see* something from a plain spoken summary or recap
+**Vision**: `look_at_screen` captures the monitor under your cursor (MARA's own windows are hidden), downscaled JPEG in memory only. Ask what is on screen or "what's wrong with this function?": MARA answers in a sentence and shows the fix as a diff in the chat. The `vision` toggle lets her look on her own when it helps.
 
-**Browser Automation**
-- Dedicated Chrome instance with isolated profile
-- Navigate, click, type, read page content
-- Automatic credential management (encrypted)
-- Combined with Vision mode for fully autonomous browser interaction
+**Memory**: facts, preferences and current context about you, extracted in the background by Claude Haiku, encrypted with a key protected by Windows DPAPI, used implicitly and never recited.
 
-**Vision Mode**
-- On command, MARA takes a screenshot and analyzes it with Claude Vision
-- Can describe the screen, identify open apps, read content
-- Dedicated code-review mode — reads code visible on screen, explains the bug, and opens a window with the corrected version
-- Triggered vocally ("what do you see?", "look at my code") or via the UI
+**Interface**: a sober terminal-style window (Inter + JetBrains Mono), action receipts with timings, code blocks with copy, live transcription while you speak, real mic level, tray icon, a 3D orb that shows listening / thinking / speaking / waiting.
 
-**Interface**
-- Floating PyQt5 chat window — flat, minimal, deep charcoal theme, hairline borders, no gradients
-- Message bubbles with avatars, pill-shaped input bar, Silent mode and Vision mode toggles
-- 3D neural orb — a transparent globe that pulses and glows based on state (listening / thinking / speaking)
-- Silent mode — MARA acts without speaking
-- Work mode — launches a full dev environment in one command
+## Setup
 
-**Reliability**
-- Manual launch via `launch_mara.bat` / `launch_mara.vbs` — deliberate choice over silent auto-boot
-- Whisper loads in the background — zero startup delay
-- Encrypted local memory and credentials via Fernet
-- Thread-safe architecture with Qt signals
+Requirements: Windows 10/11, Python 3.11, an NVIDIA GPU with CUDA for Whisper (CPU works but is slow), Google Chrome for browser features.
 
----
+```
+git clone <this repo> MARA
+cd MARA
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu121
+```
 
-## Tech Stack
+`openai-whisper` pulls a CPU build of PyTorch; the second `pip install` replaces it with the CUDA build. Check with `python -c "import torch; print(torch.cuda.is_available())"`.
 
-| Layer | Technology |
+Create `.env` in the repo root:
+
+```
+ANTHROPIC_API_KEY=sk-ant-...
+FISH_API_KEY=...
+USER_NAME=YourFirstName
+```
+
+Optional: edit `%APPDATA%\MARA\profile.md` (created from `profile.example.md` on first start) to tell MARA about yourself.
+
+### F13 push-to-talk
+
+F13 does not exist on most keyboards, so nothing else uses it. Map a spare mouse button to F13 in your mouse software (Logitech G HUB: assign the button a keystroke and pick F13). If your software cannot send F13, an AutoHotkey line such as `XButton1::F13` does it. Any other key works too: change `TRIGGER_KEY` in `core/config.py`.
+
+## Run
+
+```
+venv\Scripts\activate
+python main.py
+```
+
+The window starts hidden: use the tray icon, say "show the interface", or set `START_HIDDEN = False` in `core/config.py`. Quit from the tray menu or by asking MARA to shut down.
+
+`python -m core.cli` runs the agent in a terminal (no voice, no Qt). Developer checks: `pip install -r requirements-dev.txt`, then `powershell scripts\check.ps1` (compileall, ruff, pytest).
+
+## Data
+
+| What | Where |
 |---|---|
-| Language | Python 3.11.9 |
-| Speech-to-Text | OpenAI Whisper turbo (CUDA, local) |
-| LLM — Reasoning & routing | Anthropic Claude Sonnet 5 (API, native tool use) |
-| LLM — Language detection & memory extraction | Anthropic Claude Haiku (API) |
-| Text-to-Speech | Fish Audio S2 Pro (streaming API) |
-| UI Framework | PyQt5 |
-| 3D Rendering | PyQt5 custom OpenGL-style widget |
-| Browser Automation | Selenium + Chrome WebDriver |
-| Audio I/O | sounddevice, scipy |
-| Memory | Fernet-encrypted JSON (local) |
-| GPU Acceleration | CUDA via PyTorch |
-| OS Integration | pycaw, screen_brightness_control, Windows Search index, subprocess |
+| Memory, credentials (`*.enc`), DPAPI-protected key (`mara.key.dpapi`), `profile.md`, `app_registry.json` | `%APPDATA%\MARA` |
+| Logs (`mara.log`, with one `[Latency]` line per turn) | `%LOCALAPPDATA%\MARA\logs` |
+| MARA's Chrome profile | `%LOCALAPPDATA%\MARA\ChromeProfile` |
+| Screenshots you ask for | `Pictures\Screenshots` |
 
----
+On the first start after updating, the old plaintext `mara.key` is moved to DPAPI protection and kept as `mara.key.bak`; delete the backup once MARA works. Window size and position are stored by Qt in the registry (`HKCU\Software\MARA`).
 
-## Project Structure
+## Configuration flags (`core/config.py`)
+
+| Flag | Default | Effect when False |
+|---|---|---|
+| `STREAMING_TTS` | True | Speak sentence by sentence, one Fish request each (slower, older path) |
+| `PERSISTENT_AUDIO_OUT` | True | Open the speaker stream for each reply |
+| `PERSISTENT_MIC` | True | Open the microphone only while F13 is held (no pre-roll) |
+| `BARGE_IN` | True | Pressing F13 while MARA talks is ignored |
+| `PROMPT_CACHE` | True | No prompt caching |
+| `WARMUP_REQUEST` | True | No tiny API request at startup |
+| `LIVE_TRANSCRIPTION` | True | No partial transcript while you speak |
+| `ORB_IDLE_VISIBLE` | True | The orb fades out when idle |
+| `START_HIDDEN` | True | The window opens at launch |
+
+## Troubleshooting
+
+- **"Whisper ready (cpu)"**: the CUDA build of PyTorch is not installed, see Setup.
+- **No voice**: check `FISH_API_KEY`, the default output device, and `mara.log`. If speech is garbled, set `STREAMING_TTS = False`.
+- **F13 does nothing**: the `keyboard` hook may need MARA to run with the same privileges as the focused app; check your mouse mapping with a key tester.
+- **"Cannot reach Claude"** in the chat: network or API key problem; the next message works once it is back.
+- **Browser actions fail**: Chrome must be installed; Selenium downloads a matching chromedriver on first use.
+- **Memory looks empty**: if the file could not be read it was copied to `mara_memory.enc.<date>.corrupt` in `%APPDATA%\MARA`; nothing is deleted.
+
+## Project layout
 
 ```
 MARA/
-├── main.py                 # Entry point — Qt app, worker thread, orb
+├── main.py                  # Qt app, window, orb, worker, wiring
 ├── core/
-│   ├── listener.py         # Whisper STT + mouse button trigger
-│   ├── brain.py            # Claude API + native tool-use routing + memory
-│   ├── voice.py            # Fish Audio TTS + real-time PCM streaming
-│   ├── executor.py         # System actions dispatcher
-│   ├── browser.py          # Selenium Chrome automation
-│   ├── app_registry.py     # Dynamic app registry via PowerShell
-│   ├── system.py           # Volume, brightness, WiFi, clock, screenshots
-│   ├── ui.py                # PyQt5 floating window + worker thread
-│   └── orb.py               # 3D neural orb widget
-├── memory/
-│   ├── memory.py            # Encrypted persistent memory (Singleton)
-│   └── credentials.py       # Encrypted credential store
-└── assets/
-    └── app_registry.json
+│   ├── brain.py             # Agent loop, prompt, history, confirmations
+│   ├── session.py           # Input queue, pause/wake word, speech per turn, barge-in
+│   ├── events.py            # Typed events between core and UI
+│   ├── cli.py               # Terminal frontend
+│   ├── tools/               # registry + system, app, browser, memory, vision, UI tools
+│   ├── listener.py          # F13, persistent mic, Whisper
+│   ├── voice.py             # Fish Audio streaming TTS, audio output
+│   ├── text.py              # Text cleaning, sentence splitting, markdown helpers
+│   ├── system.py            # Volume, brightness, WiFi, time, capture, modes, pause
+│   ├── browser.py           # Selenium Chrome
+│   ├── app_registry.py      # Installed apps scan
+│   ├── metrics.py           # Latency recap per turn
+│   ├── shutdown.py          # Closes Chrome, mic and audio on exit
+│   ├── orb.py               # 3D orb
+│   └── ui/                  # theme, window, messages, composer, visual window, password dialog, worker
+├── memory/                  # encrypted memory, credentials vault, DPAPI key store
+├── assets/fonts/            # Inter and JetBrains Mono (SIL OFL)
+├── scripts/check.ps1        # compileall + ruff + pytest
+└── tests/                   # pytest suite, all fakes (no network, GPU or microphone)
 ```
-
----
 
 ## Cost
 
-MARA runs at approximately **$3.50–7.50/month** in API costs — less than a coffee.
-
-| Service | Monthly Cost |
-|---|---|
-| Claude Sonnet 5 | ~$2–6 |
-| Claude Haiku | ~$0.50 |
-| Fish Audio S2 Pro | ~$1 |
-
-Everything else runs locally at zero cost.
-
----
-
-## What I learned building this
-
-This project pushed me across a wide range of engineering challenges — real-time audio streaming, GPU inference, thread-safe Qt architecture, native LLM tool-calling, encrypted local storage, browser automation, and Windows system integration. More than anything, it taught me how to architect a complex system where many moving parts need to work together reliably, without any single component blocking the others — and how to recognize when an architecture, not just a prompt, needs to change.
-
-MARA is not a weekend project. It is an ongoing system I use every day and continue to improve.
+Roughly **$3.50–7.50/month** in API costs: Claude Sonnet ~$2–6 (less with prompt caching), Claude Haiku for memory extraction ~$0.50, Fish Audio ~$1. Speech recognition runs locally.
 
 ---
 

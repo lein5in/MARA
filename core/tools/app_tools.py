@@ -274,7 +274,7 @@ def register(reg: Registry):
         pyperclip.copy(text)
         time.sleep(0.15)
         pyautogui.hotkey("ctrl", "v")
-        time.sleep(0.1)
+        time.sleep(0.5)
         if previous is not None:
             try:
                 pyperclip.copy(previous)

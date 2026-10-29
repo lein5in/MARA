@@ -177,8 +177,5 @@ class BrowserController:
                 time.sleep(step.get("seconds", 1))
         return f"Logged into {site}."
 
-    def delete_credential(self, site: str) -> str:
-        return get_credentials().delete(site)
-
 
 browser = BrowserController()

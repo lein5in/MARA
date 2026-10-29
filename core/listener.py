@@ -12,13 +12,13 @@ from core.config import (
     TRIGGER_KEY, WHISPER_MODEL, STT_SAMPLE_RATE as SAMPLE_RATE, STT_CHUNK_SIZE as CHUNK_SIZE, LIVE_TRANSCRIPTION,
     PERSISTENT_MIC, MIC_PREROLL_SECONDS, MIN_RECORDING_SECONDS, MIN_RECORDING_LEVEL, BARGE_IN,
 )
-from core.events import StateChanged, State, MicLevel, UserTranscript
+from core.events import StateChanged, State, MicLevel, UserTranscript, Error
 from core.log import get_logger
 log = get_logger(__name__)
 startup_log = get_logger("startup")
 
 PARTIAL_INTERVAL = 1.2
-WHISPER_PROMPT = "MARA assistant vocal personnel."
+WHISPER_PROMPT = "MARA."
 
 model = None
 _model_ready = threading.Event()
@@ -30,9 +30,14 @@ _mic = None
 
 def _load_whisper():
     global model
-    import whisper
     startup_log.info("Loading Whisper...")
-    model = whisper.load_model(WHISPER_MODEL)
+    try:
+        import whisper
+        model = whisper.load_model(WHISPER_MODEL)
+    except Exception as e:
+        log.exception("[Listener] Whisper failed to load")
+        _emit(Error(f"Speech recognition could not start ({type(e).__name__}). Typing still works; see mara.log."))
+        return
     startup_log.info(f"Whisper ready ({model.device.type})")
     try:
         with _whisper_lock:
@@ -245,5 +250,4 @@ def listen() -> str:
     else:
         metrics.discard()
         _emit(UserTranscript("", final=True))
-        _emit(StateChanged(State.IDLE))
     return text

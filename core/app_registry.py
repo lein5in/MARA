@@ -14,26 +14,26 @@ BLACKLIST_NAMES = {
 
 
 BLACKLIST_PATH_FRAGMENTS = [
-    
+
     "\\Git\\usr\\",
     "\\Git\\mingw64\\",
     "\\Git\\mingw32\\",
-    
+
     "\\Android\\Sdk\\",
-    
+
     "\\jdk-",
     "\\jre-",
-    
+
     "\\go-build\\",
-    
+
     "\\Package Cache\\",
-    
+
     "\\Temp\\pip-",
-    
+
     "\\LGHUB\\integrations\\",
-    
+
     ".exe_Rules",
-    
+
     "\\Best_Buy_Canada_Ltd\\",
     "\\iMobie_Inc\\",
 ]
@@ -166,21 +166,14 @@ $apps | Select-Object -Unique name, path | ConvertTo-Json -Compress
 """
 
 
-
-
 def _resolve_versioned(name: str, found_path: str) -> str:
-    """
-    Si le chemin trouvé est un Update.exe / Installer.exe,
-    cherche le vrai exe dans les sous-dossiers connus.
-    Retourne le vrai chemin ou le chemin original si rien trouvé.
-    """
     basename = Path(found_path).name.lower()
     is_bad = any(x in basename for x in ["update.exe", "installer.exe", "setup.exe"])
 
     if not is_bad:
         return found_path
 
-  
+
     for key, info in VERSIONED_APPS.items():
         if key in name or name in key:
             search_path = info["search_path"]
@@ -188,28 +181,25 @@ def _resolve_versioned(name: str, found_path: str) -> str:
             if search_path.exists():
                 matches = sorted(search_path.glob(pattern))
                 if matches:
-                    
+
                     return str(matches[-1])
 
-    
+
     parent = Path(found_path).parent
-    target_name = name.split()[0]  
+    target_name = name.split()[0]
     candidates = list(parent.glob(f"**/{target_name}.exe"))
     if candidates:
         return str(candidates[0])
 
-    return found_path  
-
-
+    return found_path
 
 
 def _is_valid_entry(name: str, path: str) -> bool:
-    """Vérifie qu'une entrée nom/path est valide avant indexation."""
-    
+
     if name in BLACKLIST_NAMES:
         return False
 
-    
+
     path_lower = path.lower()
     for fragment in BLACKLIST_PATH_FRAGMENTS:
         if fragment.lower() in path_lower:
@@ -218,11 +208,8 @@ def _is_valid_entry(name: str, path: str) -> bool:
     return True
 
 
-
-
 def build_registry() -> dict:
-    """Lance le scan PowerShell et construit le registre propre des apps."""
-    log.info("[Registry] Scan des applications en cours...")
+    log.info("[Registry] Scanning installed applications...")
 
     try:
         result = subprocess.run(
@@ -233,14 +220,14 @@ def build_registry() -> dict:
         )
         raw = result.stdout.strip()
         if not raw:
-            log.warning("[Registry] Aucun résultat du scan.")
+            log.warning("[Registry] The scan returned nothing.")
             return {}
 
         apps_list = json.loads(raw)
         if isinstance(apps_list, dict):
             apps_list = [apps_list]
 
-        
+
         registry = {}
         skipped = 0
         for app in apps_list:
@@ -257,26 +244,25 @@ def build_registry() -> dict:
                 skipped += 1
                 continue
 
-            
+
             path = _resolve_versioned(name, path)
 
             registry[name] = path
 
-       
+
         REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
         with open(REGISTRY_PATH, "w", encoding="utf-8") as f:
             json.dump(registry, f, indent=2, ensure_ascii=False)
 
-        log.info(f"[Registry] {len(registry)} apps indexées ({skipped} exclues) → {REGISTRY_PATH}")
+        log.info(f"[Registry] {len(registry)} apps indexed ({skipped} skipped) -> {REGISTRY_PATH}")
         return registry
 
     except Exception as e:
-        log.error(f"[Registry] Erreur scan : {e}")
+        log.error(f"[Registry] Scan failed: {e}")
         return {}
 
 
 def load_registry() -> dict:
-    """Charge le registre depuis le cache JSON."""
     if REGISTRY_PATH.exists():
         try:
             with open(REGISTRY_PATH, "r", encoding="utf-8") as f:
@@ -287,39 +273,31 @@ def load_registry() -> dict:
 
 
 def get_registry(rebuild: bool = False) -> dict:
-    """Retourne le registre — depuis le cache si disponible, sinon rebuild."""
     if rebuild or not REGISTRY_PATH.exists():
         return build_registry()
     return load_registry()
 
 
-
-
 def find_app(name: str, registry: dict) -> str | None:
-    """
-    Cherche une app dans le registre par nom.
-    Stratégie : exact → alias → fuzzy contains → fuzzy exe name.
-    Retourne le chemin ou None.
-    """
     name = name.lower().strip()
 
-    
+
     if name in registry:
         return registry[name]
 
-    
+
     for canonical, aliases in ALIASES.items():
         if name in aliases or name == canonical:
             for alias in aliases:
                 if alias in registry:
                     return registry[alias]
 
-    
+
     for key, path in registry.items():
         if name in key or key in name:
             return path
 
-    
+
     for key, path in registry.items():
         exe_name = Path(path).stem.lower()
         if name in exe_name or exe_name in name:

@@ -1,3 +1,4 @@
+import os
 import sys
 import threading
 
@@ -35,9 +36,7 @@ def main():
     from core.tools import vision_tools, browser_tools
     from core.ui.secret import ask_password
 
-    theme.load_fonts()
-    app.setStyleSheet(theme.build_qss())
-    app.setWindowIcon(theme.app_icon())
+    theme.apply(app)
 
     startup_log.info("MARA starting...")
     startup_log.info("Scanning applications...")
@@ -90,7 +89,10 @@ def main():
     def on_quit():
         window.save_geometry()
         worker.stop()
-        worker.wait(3000)
+        if not worker.wait(3000):
+            log.warning("Worker still busy at quit, forcing exit.")
+            shutdown.run()
+            os._exit(0)
         shutdown.run()
 
     app.aboutToQuit.connect(on_quit)
