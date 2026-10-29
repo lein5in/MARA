@@ -308,7 +308,7 @@ class Agent:
     def _run_tool(self, block: dict) -> dict:
         name, args, tid = block["name"], block.get("input") or {}, block["id"]
         tool = self.registry.get(name)
-        self._emit(ToolStarted(tid, name, args))
+        self._emit(ToolStarted(tid, name, args, tool.args_summary(args) if tool else ""))
         if self._needs_confirmation(tool) and not self._confirm(tool, args, tid):
             result = ToolResult(False, "Cancelled by the user. Do not retry; acknowledge briefly.", "cancelled")
         else:

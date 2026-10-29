@@ -6,7 +6,7 @@ from core.events import (
     QuitRequested, ShowInterface, HideInterface, ConversationReset, ModeChanged,
 )
 
-DIM, ACCENT, WARN, RESET = "\033[2m", "\033[38;2;232;160;180m", "\033[38;2;229;181;103m", "\033[0m"
+DIM, PINK, WARN, RESET = "\033[2m", "\033[38;2;232;160;180m", "\033[38;2;229;181;103m", "\033[0m"
 
 
 class Console:
@@ -26,7 +26,7 @@ class Console:
         elif isinstance(event, ToolStarted):
             self.write(f"\n{DIM}  … {event.name} {event.args}{RESET}")
         elif isinstance(event, ToolFinished):
-            mark = f"{ACCENT}✓{RESET}" if event.ok else f"{WARN}✗{RESET}"
+            mark = f"{PINK}✓{RESET}" if event.ok else f"{WARN}✗{RESET}"
             self.write(f"\r{mark} {event.name} {DIM}{event.duration:.1f}s {event.summary}{RESET}\n")
         elif isinstance(event, ConfirmationRequested):
             self.write(f"\n{WARN}! {event.title}{RESET}: {event.description}\n  {event.tool} {event.args}\n")
@@ -50,7 +50,7 @@ def main():
     print("MARA console. Type a message, /reset to clear the conversation, /quit to exit.")
     while not console.quit:
         try:
-            text = input(f"{ACCENT}› {RESET}").strip()
+            text = input(f"{PINK}› {RESET}").strip()
         except (EOFError, KeyboardInterrupt):
             break
         if not text:
@@ -61,7 +61,7 @@ def main():
             agent.reset()
             print(f"{DIM}conversation cleared{RESET}")
             continue
-        sys.stdout.write(f"{ACCENT}mara{RESET} ")
+        sys.stdout.write(f"{PINK}mara{RESET} ")
         agent.run_turn(text, source="typed")
 
 

@@ -22,6 +22,7 @@ class ToolStarted:
     id: str
     name: str
     args: dict
+    label: str = ""
 
 
 @dataclass
@@ -62,6 +63,11 @@ class Visual:
 @dataclass
 class Error:
     message: str
+
+
+@dataclass
+class Notice:
+    text: str
 
 
 @dataclass

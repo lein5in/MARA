@@ -5,7 +5,7 @@ from core import system
 from core.brain import Agent, ConfirmationBroker
 from core.config import TRIGGER_KEY
 from core.events import (
-    TextDelta, ToolStarted, StateChanged, State, QuitRequested, TurnStarted, ConfirmationRequested, Error,
+    TextDelta, ToolStarted, StateChanged, State, QuitRequested, TurnStarted, ConfirmationRequested, Error, Notice,
 )
 from core.text import parse_yes_no, has_word
 from core.log import get_logger
@@ -70,6 +70,7 @@ class Session:
         self._speaking = False
         self._quit_pending = False
         self._was_paused = False
+        self.busy = False
 
     def submit(self, text: str, source: str = "typed") -> bool:
         text = (text or "").strip()
@@ -89,7 +90,10 @@ class Session:
         return self.broker.resolve(accepted, cid)
 
     def new_conversation(self):
-        self.agent.reset()
+        if self.busy:
+            self.agent.request_reset()
+        else:
+            self.agent.reset()
 
     def stop(self):
         self.running = False
@@ -127,9 +131,11 @@ class Session:
         self.emit(TurnStarted(text, source))
         self._speaking = False
         self._speech = NullSpeech() if system.is_silent() else self.speech_factory()
+        self.busy = True
         try:
             self.agent.run_turn(text, source)
         finally:
+            self.busy = False
             speech, self._speech = self._speech, NullSpeech()
             speech.end()
             self._speaking = False
@@ -146,12 +152,15 @@ class Session:
         except Exception:
             log.exception("[Session] say failed")
 
-    def _handle_paused(self, text: str):
+    def _handle_paused(self, text: str, source: str = "typed"):
+        self.emit(TurnStarted(text, source))
         if has_word(text, WAKE_WORD):
             system.cancel_pause(self.memory)
+            self.emit(Notice(localized(BACK)))
             self._say(localized(BACK))
             self.emit(StateChanged(State.IDLE))
         else:
+            self.emit(Notice(localized(OFFLINE)))
             self._say(localized(OFFLINE))
             self.emit(StateChanged(State.PAUSED))
 
@@ -167,7 +176,7 @@ class Session:
         self._was_paused = paused
         try:
             if paused:
-                self._handle_paused(text)
+                self._handle_paused(text, source)
             else:
                 self.run_turn(text, source)
         except Exception:

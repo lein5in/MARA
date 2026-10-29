@@ -157,6 +157,61 @@ def has_word(text: str, word: str) -> bool:
     return word.lower() in words(text)
 
 
+_FENCE = re.compile(r"^[ \t]*```[ \t]*([^\n`]*)\n?", re.MULTILINE)
+
+
+def split_fences(text: str) -> list[dict]:
+    segments = []
+    pos = 0
+    while True:
+        m = _FENCE.search(text, pos)
+        if not m:
+            break
+        if text[pos:m.start()].strip():
+            segments.append({"kind": "text", "text": text[pos:m.start()].strip("\n")})
+        info = m.group(1).strip().split()
+        end = _FENCE.search(text, m.end())
+        while end and end.group(1).strip():
+            end = _FENCE.search(text, end.end())
+        body = text[m.end():end.start() if end else len(text)]
+        segments.append({
+            "kind": "code",
+            "lang": info[0].lower() if info else "",
+            "diff": bool(info) and (info[0].lower() == "diff" or any(w.lower() in ("diff", "fix") for w in info[1:])),
+            "code": body.rstrip("\n"),
+            "closed": end is not None,
+        })
+        if not end:
+            return segments
+        pos = end.end()
+    rest = text[pos:]
+    if rest.strip() or not segments:
+        segments.append({"kind": "text", "text": rest.strip("\n")})
+    return segments
+
+
+def code_lines(code: str, diff: bool) -> list[tuple[int, str, str]]:
+    rows = []
+    n = 1
+    for line in code.split("\n"):
+        if not diff:
+            rows.append((n, " ", line))
+            n += 1
+            continue
+        marker = line[:1] if line[:1] in ("+", "-") else " "
+        content = line[1:] if line[:1] in ("+", "-", " ") else line
+        rows.append((n, marker, content))
+        if marker != "-":
+            n += 1
+    return rows
+
+
+def copyable_code(code: str, diff: bool) -> str:
+    if not diff:
+        return code
+    return "\n".join(content for _, marker, content in code_lines(code, True) if marker != "-")
+
+
 def pcm16_from_wav(data: bytes, header_size: int = 44) -> bytes:
     pcm = data[header_size:] if data[:4] == b"RIFF" else data
     if len(pcm) % 2:
