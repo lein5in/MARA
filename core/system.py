@@ -1,7 +1,7 @@
 import re
 import subprocess
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime
 from zoneinfo import ZoneInfo
 from core.config import SCREENSHOTS_DIR
 from core.log import get_logger
@@ -14,32 +14,37 @@ try:
     _PYCAW_OK = True
 except ImportError:
     _PYCAW_OK = False
-    log.warning("[System] pycaw non disponible — contrôle volume désactivé.")
+    log.warning("[System] pycaw not available, volume control disabled.")
 
 try:
     import screen_brightness_control as sbc
     _SBC_OK = True
 except ImportError:
     _SBC_OK = False
-    log.warning("[System] screen_brightness_control non disponible — contrôle luminosité désactivé.")
+    log.warning("[System] screen_brightness_control not available, brightness control disabled.")
 
 try:
     import pyautogui
-    from PIL import Image  # noqa: F401
     _SCREENSHOT_OK = True
 except ImportError:
     _SCREENSHOT_OK = False
-    log.warning("[System] pyautogui/PIL non disponible — screenshots désactivés.")
+    log.warning("[System] pyautogui not available, screenshots disabled.")
 
-SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+
+class SystemActionError(Exception):
+    pass
+
 
 _current_lang = "en"
 
 def set_current_lang(lang: str):
     global _current_lang
-    lang = lang.lower().strip()
+    lang = (lang or "").lower().strip()
     if lang in ("fr", "en", "ar"):
         _current_lang = lang
+
+def current_lang() -> str:
+    return _current_lang
 
 _is_speaking = threading.Event()
 
@@ -52,293 +57,117 @@ def set_speaking(val: bool):
 def is_speaking() -> bool:
     return _is_speaking.is_set()
 
-_silent_mode = False
+_modes = {"silent": False, "vision": False}
+_mode_lock = threading.Lock()
 
 def set_silent(val: bool):
-    global _silent_mode
-    _silent_mode = val
-    log.info(f"[System] Silent mode {'activé' if val else 'désactivé'}.")
+    with _mode_lock:
+        _modes["silent"] = bool(val)
+    log.info(f"[System] Silent mode {'on' if val else 'off'}.")
 
 def is_silent() -> bool:
-    return _silent_mode
+    return _modes["silent"]
 
-_SILENT_ON = {
-    "fr": "Mode silencieux activé. J'agis sans parler.",
-    "en": "Silent mode on. I'll act without speaking.",
-    "ar": "وضع الصمت مفعّل. سأعمل بدون كلام.",
-}
+def set_vision(val: bool):
+    with _mode_lock:
+        _modes["vision"] = bool(val)
+    log.info(f"[System] Vision mode {'on' if val else 'off'}.")
 
-_SILENT_OFF = {
-    "fr": "Mode silencieux désactivé. Je suis de retour.",
-    "en": "Silent mode off. I'm back.",
-    "ar": "وضع الصمت معطّل. أنا هنا.",
-}
-
-def enable_silent() -> str:
-    set_silent(True)
-    return _SILENT_ON.get(_current_lang, _SILENT_ON["en"])
-
-def disable_silent() -> str:
-    set_silent(False)
-    return _SILENT_OFF.get(_current_lang, _SILENT_OFF["en"])
-
-_PAUSE_RESPONSES = {
-    "fr": "Je me désactive pour {duration}. Réveil à {wake_time}.",
-    "en": "Going quiet for {duration}. I'll be back at {wake_time}.",
-    "ar": "سأتوقف لمدة {duration}. سأعود في {wake_time}.",
-}
-
-_PAUSE_DURATION_FR = {
-    "hours":   lambda h, m: f"{h}h{m:02d}" if m else f"{h} heure{'s' if h > 1 else ''}",
-    "minutes": lambda m: f"{m} minute{'s' if m > 1 else ''}",
-}
-_PAUSE_DURATION_EN = {
-    "hours":   lambda h, m: f"{h}h{m:02d}" if m else f"{h} hour{'s' if h > 1 else ''}",
-    "minutes": lambda m: f"{m} minute{'s' if m > 1 else ''}",
-}
-_PAUSE_DURATION_AR = {
-    "hours":   lambda h, m: f"{h} ساعة" if h == 1 else f"{h} ساعات",
-    "minutes": lambda m: f"{m} دقيقة" if m == 1 else f"{m} دقائق",
-}
-_DURATION_BUILDERS = {
-    "fr": _PAUSE_DURATION_FR,
-    "en": _PAUSE_DURATION_EN,
-    "ar": _PAUSE_DURATION_AR,
-}
-
-def _build_duration_str(delta: timedelta, lang: str) -> str:
-    builders = _DURATION_BUILDERS.get(lang, _PAUSE_DURATION_EN)
-    total_minutes = round(delta.total_seconds() / 60)
-    if total_minutes >= 60:
-        hours   = total_minutes // 60
-        minutes = total_minutes % 60
-        return builders["hours"](hours, minutes)
-    return builders["minutes"](total_minutes)
-
-_WORD_TO_NUM = {
-    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
-    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
-    "eleven": 11, "twelve": 12, "fifteen": 15, "twenty": 20,
-    "thirty": 30, "forty": 40, "sixty": 60,
-    "un": 1, "une": 1, "deux": 2, "trois": 3, "quatre": 4, "cinq": 5,
-    "sept": 7, "huit": 8, "neuf": 9, "dix": 10,
-    "quinze": 15, "vingt": 20, "trente": 30, "quarante": 40, "soixante": 60,
-}
-
-def _normalize_numbers(text: str) -> str:
-    for word, num in _WORD_TO_NUM.items():
-        text = re.sub(rf"\b{word}\b", str(num), text, flags=re.IGNORECASE)
-    return text
+def is_vision() -> bool:
+    return _modes["vision"]
 
 _volume_interface = None
 
 def _get_volume_interface():
     global _volume_interface
     if not _PYCAW_OK:
-        return None
-    if _volume_interface is not None:
-        return _volume_interface
-    try:
+        raise SystemActionError("volume control is not available on this machine")
+    if _volume_interface is None:
         import comtypes
         comtypes.CoInitialize()
         devices = AudioUtilities.GetSpeakers()
         interface = devices._dev.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
         _volume_interface = cast(interface, POINTER(IAudioEndpointVolume))
-        return _volume_interface
-    except Exception as e:
-        log.error(f"[System] Erreur interface volume : {e}")
-        return None
+    return _volume_interface
 
-def set_volume(level: int) -> str:
-    level = max(0, min(100, level))
+def set_volume(level: int) -> int:
+    level = max(0, min(100, int(level)))
+    _get_volume_interface().SetMasterVolumeLevelScalar(level / 100.0, None)
+    return level
+
+def get_volume() -> tuple[int, bool]:
     vol = _get_volume_interface()
-    if not vol:
-        return "Contrôle volume non disponible."
-    try:
-        vol.SetMasterVolumeLevelScalar(level / 100.0, None)
-        return f"Volume réglé à {level}%."
-    except Exception as e:
-        return f"Erreur volume : {e}"
+    return round(vol.GetMasterVolumeLevelScalar() * 100), bool(vol.GetMute())
 
-def get_volume() -> str:
-    vol = _get_volume_interface()
-    if not vol:
-        return "Contrôle volume non disponible."
-    try:
-        level = round(vol.GetMasterVolumeLevelScalar() * 100)
-        muted = vol.GetMute()
-        status = " (muet)" if muted else ""
-        return f"Volume actuel : {level}%{status}."
-    except Exception as e:
-        return f"Erreur lecture volume : {e}"
+def set_mute(muted: bool):
+    _get_volume_interface().SetMute(1 if muted else 0, None)
 
-def mute() -> str:
-    vol = _get_volume_interface()
-    if not vol:
-        return "Contrôle volume non disponible."
-    try:
-        vol.SetMute(1, None)
-        return "Son coupé."
-    except Exception as e:
-        return f"Erreur mute : {e}"
-
-def unmute() -> str:
-    vol = _get_volume_interface()
-    if not vol:
-        return "Contrôle volume non disponible."
-    try:
-        vol.SetMute(0, None)
-        return "Son réactivé."
-    except Exception as e:
-        return f"Erreur unmute : {e}"
-
-def set_brightness(level: int) -> str:
+def set_brightness(level: int) -> int:
     if not _SBC_OK:
-        return "Contrôle luminosité non disponible."
-    level = max(0, min(100, level))
-    try:
-        sbc.set_brightness(level)
-        return f"Luminosité réglée à {level}%."
-    except Exception as e:
-        return f"Erreur luminosité : {e}"
+        raise SystemActionError("brightness control is not available on this machine")
+    level = max(0, min(100, int(level)))
+    sbc.set_brightness(level)
+    return level
 
-def get_brightness() -> str:
+def get_brightness() -> int:
     if not _SBC_OK:
-        return "Contrôle luminosité non disponible."
-    try:
-        level = sbc.get_brightness()
-        if isinstance(level, list):
-            level = level[0]
-        return f"Luminosité actuelle : {level}%."
-    except Exception as e:
-        return f"Erreur lecture luminosité : {e}"
+        raise SystemActionError("brightness control is not available on this machine")
+    level = sbc.get_brightness()
+    if isinstance(level, list):
+        level = level[0]
+    return int(level)
+
+def _netsh(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["netsh", "wlan", *args], capture_output=True, text=True, timeout=15)
 
 def wifi_disconnect() -> str:
-    try:
-        subprocess.run(["netsh", "wlan", "disconnect"], capture_output=True, text=True, check=True)
-        return "WiFi déconnecté."
-    except subprocess.CalledProcessError as e:
-        return f"Erreur déconnexion WiFi : {e.stderr.strip()}"
+    result = _netsh("disconnect")
+    if result.returncode != 0:
+        raise SystemActionError(result.stderr.strip() or result.stdout.strip() or "netsh failed")
+    return "WiFi disconnected."
 
 def wifi_connect(ssid: str | None = None) -> str:
-    try:
-        if ssid:
-            result = subprocess.run(["netsh", "wlan", "connect", f"name={ssid}"], capture_output=True, text=True)
-        else:
-            profiles_result = subprocess.run(["netsh", "wlan", "show", "profiles"], capture_output=True, text=True)
-            profiles = re.findall(r"All User Profile\s*:\s*(.+)", profiles_result.stdout)
-            if not profiles:
-                return "Aucun réseau WiFi connu trouvé."
-            ssid = profiles[0].strip()
-            result = subprocess.run(["netsh", "wlan", "connect", f"name={ssid}"], capture_output=True, text=True)
-        if "successfully" in result.stdout.lower() or result.returncode == 0:
-            return f"Connexion à {ssid} initiée."
-        return f"Échec connexion WiFi : {result.stdout.strip()}"
-    except Exception as e:
-        return f"Erreur WiFi : {e}"
+    if not ssid:
+        profiles = re.findall(r"All User Profile\s*:\s*(.+)", _netsh("show", "profiles").stdout)
+        if not profiles:
+            raise SystemActionError("no known WiFi network")
+        ssid = profiles[0].strip()
+    result = _netsh("connect", f"name={ssid}")
+    if result.returncode != 0:
+        raise SystemActionError(result.stdout.strip() or "connection failed")
+    return f"Connecting to {ssid}."
 
-def get_time(timezone: str | None = None) -> str:
-    try:
-        if timezone:
-            now = datetime.now(ZoneInfo(timezone))
-            return f"{now.strftime('%A %d %B %Y, %H:%M')} ({timezone})"
-        now = datetime.now()
-        return now.strftime('%A %d %B %Y, %H:%M')
-    except Exception as e:
-        return f"Erreur horloge : {e}"
+def wifi_status() -> str:
+    output = _netsh("show", "interfaces").stdout
+    state = re.search(r"^\s*State\s*:\s*(.+)$", output, re.MULTILINE)
+    ssid = re.search(r"^\s*SSID\s*:\s*(.+)$", output, re.MULTILINE)
+    state = state.group(1).strip() if state else "unknown"
+    ssid = ssid.group(1).strip() if ssid else "unknown"
+    if state.lower() == "connected":
+        return f"WiFi connected to {ssid}."
+    return f"WiFi not connected (state: {state})."
 
-def get_wifi_status() -> str:
-    try:
-        result = subprocess.run(["netsh", "wlan", "show", "interfaces"], capture_output=True, text=True)
-        output = result.stdout
-        state_match = re.search(r"State\s*:\s*(.+)", output)
-        ssid_match  = re.search(r"SSID\s*:\s*(.+)", output)
-        state = state_match.group(1).strip() if state_match else "inconnu"
-        ssid  = ssid_match.group(1).strip()  if ssid_match  else "inconnu"
-        if "connected" in state.lower():
-            return f"WiFi connecté à {ssid}."
-        return f"WiFi déconnecté (dernier réseau : {ssid})."
-    except Exception as e:
-        return f"Erreur lecture WiFi : {e}"
+def now(timezone: str | None = None) -> datetime:
+    if timezone:
+        return datetime.now(ZoneInfo(timezone))
+    return datetime.now().astimezone()
 
 def take_screenshot(filename: str | None = None) -> str:
     if not _SCREENSHOT_OK:
-        return "Screenshots non disponibles."
-    try:
-        if not filename:
-            filename = f"screenshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        if not filename.endswith(".png"):
-            filename += ".png"
-        filepath = SCREENSHOTS_DIR / filename
-        screenshot = pyautogui.screenshot()
-        screenshot.save(str(filepath))
-        log.info(f"[System] Screenshot sauvegardé : {filepath}")
-        return str(filepath)
-    except Exception as e:
-        return f"Erreur screenshot : {e}"
+        raise SystemActionError("screenshots are not available")
+    SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+    if not filename:
+        filename = f"screenshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    filename = re.sub(r'[<>:"/\\|?*]', "_", filename)
+    if not filename.lower().endswith(".png"):
+        filename += ".png"
+    filepath = SCREENSHOTS_DIR / filename
+    pyautogui.screenshot().save(str(filepath))
+    log.info(f"[System] Screenshot saved: {filepath}")
+    return str(filepath)
 
-def take_screenshot_for_vision() -> str | None:
-    if not _SCREENSHOT_OK:
-        return None
-    try:
-        filename = f"vision_{datetime.now().strftime('%Y%m%d_%H%M%S%f')}.png"
-        filepath = SCREENSHOTS_DIR / filename
-        screenshot = pyautogui.screenshot()
-        screenshot.save(str(filepath))
-        return str(filepath)
-    except Exception as e:
-        log.error(f"[System] Erreur screenshot vision : {e}")
-        return None
-
-_DURATION_PATTERNS = [
-    (r"(\d+)\s*h(?:ours?|eures?)?",                                              "hours"),
-    (r"(\d+)\s*m(?:in(?:utes?)?)?",                                              "minutes"),
-    (r"(\d+)\s*(?:days?|jours?)",                                                "days"),
-    (r"(?:until|jusqu['\u2019]?à?)\s*(\d{1,2})h?(?::(\d{2}))?(?:\s*(am|pm))?", "until_time"),
-]
-
-def parse_pause_duration(text: str) -> datetime | None:
-    text = _normalize_numbers(text.lower().strip())
-    now  = datetime.now()
-    for pattern, unit in _DURATION_PATTERNS:
-        match = re.search(pattern, text)
-        if not match:
-            continue
-        if unit == "hours":
-            return now + timedelta(hours=int(match.group(1)))
-        elif unit == "minutes":
-            return now + timedelta(minutes=int(match.group(1)))
-        elif unit == "days":
-            return now + timedelta(days=int(match.group(1)))
-        elif unit == "until_time":
-            hour   = int(match.group(1))
-            minute = int(match.group(2)) if match.group(2) else 0
-            period = match.group(3)
-            if period == "pm" and hour != 12:
-                hour += 12
-            elif period == "am" and hour == 12:
-                hour = 0
-            target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-            if target <= now:
-                target += timedelta(days=1)
-            return target
-    return None
-
-def set_pause(duration_text: str, memory) -> str:
-    target = parse_pause_duration(duration_text)
-    if not target:
-        _not_understood = {
-            "fr": "Je n'ai pas compris la durée. Dis par exemple 'pour 2 heures' ou 'jusqu'à 21h'.",
-            "en": "I didn't catch the duration. Try something like 'for 2 hours' or 'until 9pm'.",
-            "ar": "لم أفهم المدة. جرب مثلاً 'لمدة ساعتين' أو 'حتى الساعة 9'.",
-        }
-        return _not_understood.get(_current_lang, _not_understood["en"])
-    memory.set_pause(target.isoformat())
-    delta        = target - datetime.now()
-    duration_str = _build_duration_str(delta, _current_lang)
-    wake_time    = target.strftime("%H:%M")
-    template = _PAUSE_RESPONSES.get(_current_lang, _PAUSE_RESPONSES["en"])
-    return template.format(duration=duration_str, wake_time=wake_time)
+def set_pause(until: datetime, memory):
+    memory.set_pause(until.isoformat())
 
 def is_paused(memory) -> bool:
     paused_until = memory.get_pause()
@@ -346,15 +175,15 @@ def is_paused(memory) -> bool:
         return False
     try:
         target = datetime.fromisoformat(paused_until)
-        if datetime.now() >= target:
+        current = datetime.now(target.tzinfo) if target.tzinfo else datetime.now()
+        if current >= target:
             memory.clear_pause()
-            log.info("[System] Pause expirée — MARA réactivée.")
+            log.info("[System] Pause expired, MARA is back.")
             return False
         return True
     except ValueError:
         memory.clear_pause()
         return False
 
-def cancel_pause(memory) -> str:
+def cancel_pause(memory):
     memory.clear_pause()
-    return "Je suis de retour."

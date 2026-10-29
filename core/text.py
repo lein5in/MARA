@@ -133,6 +133,30 @@ class SentenceBuffer:
         return split_sentences(rest)
 
 
+_YES = {"yes", "yeah", "yep", "yup", "sure", "ok", "okay", "confirm", "confirmed", "do it", "go ahead",
+        "oui", "ouais", "confirme", "vas-y", "d'accord", "dacord", "نعم", "أكيد", "اكيد", "موافق"}
+_NO = {"no", "nope", "nah", "not", "don't", "dont", "cancel", "stop", "wait", "abort",
+       "non", "annule", "annuler", "arrête", "arrete", "لا", "إلغاء", "الغاء"}
+
+
+def words(text: str) -> list[str]:
+    return re.findall(r"[\w'’-]+", (text or "").lower().replace("’", "'"))
+
+
+def parse_yes_no(text: str) -> bool | None:
+    tokens = words(text)
+    grams = set(tokens) | {" ".join(p) for p in zip(tokens, tokens[1:])}
+    if grams & _NO:
+        return False
+    if grams & _YES:
+        return True
+    return None
+
+
+def has_word(text: str, word: str) -> bool:
+    return word.lower() in words(text)
+
+
 def pcm16_from_wav(data: bytes, header_size: int = 44) -> bytes:
     pcm = data[header_size:] if data[:4] == b"RIFF" else data
     if len(pcm) % 2:

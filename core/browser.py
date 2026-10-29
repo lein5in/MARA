@@ -1,4 +1,5 @@
 import time
+import threading
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -51,42 +52,26 @@ BY_MAP = {
 }
 
 
-
-
 class BrowserController:
-    """
-    Contrôleur Chrome singleton.
-    Lance un Chrome dédié MARA (profil séparé) avec remote debugging.
-    Réutilise la même instance pour toutes les actions.
-    """
+    def __init__(self):
+        self._driver: webdriver.Chrome | None = None
+        self._lock = threading.Lock()
 
-    _instance = None
-    _driver: webdriver.Chrome | None = None
-
-    @classmethod
-    def get_instance(cls) -> "BrowserController":
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
-
-    
+    @property
+    def is_open(self) -> bool:
+        return self._driver is not None
 
     def _get_driver(self) -> webdriver.Chrome:
-        """Retourne le driver existant ou lance un nouveau Chrome MARA."""
         if self._driver:
             try:
-                _ = self._driver.title  # Vérifie si le driver est vivant
+                _ = self._driver.title
                 return self._driver
             except WebDriverException:
                 self._driver = None
 
         options = Options()
-
-        
-        mara_profile = CHROME_PROFILE_DIR
-        mara_profile.mkdir(parents=True, exist_ok=True)
-        options.add_argument(f"--user-data-dir={mara_profile}")
-
+        CHROME_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+        options.add_argument(f"--user-data-dir={CHROME_PROFILE_DIR}")
         options.add_argument("--no-first-run")
         options.add_argument("--no-default-browser-check")
         options.add_argument("--disable-extensions")
@@ -94,164 +79,108 @@ class BrowserController:
         options.add_experimental_option("useAutomationExtension", False)
 
         self._driver = webdriver.Chrome(options=options)
-        log.info(f"[Browser] Chrome MARA lancé → profil : {mara_profile}")
+        log.info(f"[Browser] MARA Chrome started, profile: {CHROME_PROFILE_DIR}")
         return self._driver
 
-   
+    def _by(self, by: str):
+        return BY_MAP.get((by or "css").lower(), By.CSS_SELECTOR)
 
     def navigate(self, url: str) -> str:
-        """Navigue vers une URL."""
         if not url.startswith("http"):
             url = "https://" + url
         self._get_driver().get(url)
-        return f"Navigué vers : {url}"
+        return f"Opened {url} (title: {self._driver.title})."
 
     def click(self, selector: str, by: str = "css", timeout: int = BROWSER_TIMEOUT) -> str:
-        """Clique sur un élément — attend qu'il soit cliquable."""
-        by_type = BY_MAP.get(by.lower(), By.CSS_SELECTOR)
         element = WebDriverWait(self._get_driver(), timeout).until(
-            EC.element_to_be_clickable((by_type, selector))
+            EC.element_to_be_clickable((self._by(by), selector))
         )
         element.click()
-        return f"Cliqué : {selector}"
+        return f"Clicked {selector}."
 
     def type_text(self, selector: str, text: str, by: str = "css", timeout: int = BROWSER_TIMEOUT, clear: bool = True) -> str:
-        """Tape du texte dans un champ — attend qu'il soit présent."""
-        by_type = BY_MAP.get(by.lower(), By.CSS_SELECTOR)
         element = WebDriverWait(self._get_driver(), timeout).until(
-            EC.presence_of_element_located((by_type, selector))
+            EC.presence_of_element_located((self._by(by), selector))
         )
         if clear:
             element.clear()
         element.send_keys(text)
-        return "Texte saisi."
+        return "Text entered."
 
     def wait_for(self, selector: str, by: str = "css", timeout: int = BROWSER_TIMEOUT) -> str:
-        """Attend qu'un élément soit présent dans le DOM."""
-        by_type = BY_MAP.get(by.lower(), By.CSS_SELECTOR)
         WebDriverWait(self._get_driver(), timeout).until(
-            EC.presence_of_element_located((by_type, selector))
+            EC.presence_of_element_located((self._by(by), selector))
         )
-        return f"Élément détecté : {selector}"
+        return f"Element present: {selector}."
 
     def read_element(self, selector: str, by: str = "css", timeout: int = BROWSER_TIMEOUT) -> str:
-        """Lit le texte d'un élément spécifique et le retourne."""
-        by_type = BY_MAP.get(by.lower(), By.CSS_SELECTOR)
         element = WebDriverWait(self._get_driver(), timeout).until(
-            EC.presence_of_element_located((by_type, selector))
+            EC.presence_of_element_located((self._by(by), selector))
         )
         return element.text
 
-    def read_page(self, max_chars: int = 2000) -> str:
-        """
-        Lit le contenu principal de la page sans sélecteur.
-        Essaie d'extraire le texte utile (pas les scripts, nav, footer).
-        Retourne un résumé tronqué du contenu visible.
-        """
+    def read_page(self, max_chars: int = 4000) -> str:
         driver = self._get_driver()
         title = driver.title
-
-       
         main_selectors = [
             "main", "article", "#content", ".content",
             "#main-content", ".main-content", "#results",
-            "ytd-video-renderer", ".ytd-video-renderer",  
-            "[role='main']",
+            "ytd-video-renderer", "[role='main']",
         ]
-
         text = ""
         for sel in main_selectors:
             try:
                 elements = driver.find_elements(By.CSS_SELECTOR, sel)
-                if elements:
-                    text = " | ".join(
-                        e.text.strip()
-                        for e in elements[:5]
-                        if e.text.strip()
-                    )
-                    if text:
-                        break
-            except Exception:
+                text = " | ".join(e.text.strip() for e in elements[:5] if e.text.strip())
+                if text:
+                    break
+            except WebDriverException:
                 continue
-
-        
         if not text:
             try:
-                body = driver.find_element(By.TAG_NAME, "body")
-                text = body.text.strip()
-            except Exception:
+                text = driver.find_element(By.TAG_NAME, "body").text.strip()
+            except WebDriverException:
                 text = ""
-
-       
         lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
         clean = " | ".join(lines)[:max_chars]
-
-        return f"Page : {title}\n{clean}" if clean else f"Page : {title} (contenu non lisible)"
-
-    def get_page_title(self) -> str:
-        return self._get_driver().title
+        return f"Page: {title}\n{clean}" if clean else f"Page: {title} (no readable content)"
 
     def close(self) -> str:
-        """Ferme le navigateur MARA."""
-        if self._driver:
-            self._driver.quit()
-            self._driver = None
-        return "Navigateur fermé."
-
-    
+        with self._lock:
+            driver, self._driver = self._driver, None
+        if driver:
+            try:
+                driver.quit()
+            except Exception as e:
+                log.warning(f"[Browser] quit failed: {e}")
+        return "Browser closed."
 
     def login(self, site: str) -> str:
-        """
-        Connexion automatique à un site connu.
-        Utilise les credentials stockés dans mara_credentials.enc.
-        """
         config = SITE_CONFIGS.get(site.lower())
         if not config:
-            return f"Site inconnu : {site}. Sites supportés : {', '.join(SITE_CONFIGS.keys())}"
-
+            return f"Unknown site: {site}. Supported: {', '.join(SITE_CONFIGS)}."
         if not credentials.has_credentials(site):
-            return (
-                f"No credentials stored for {site}. "
-                f"Say 'save credentials for {site}' to register them."
-            )
+            return f"No credentials stored for {site}. Ask the user to save them first."
 
-        email    = credentials.get_email(site)
+        email = credentials.get_email(site)
         password = credentials.get_password(site)
-
         self.navigate(config["url"])
-
         for step in config["steps"]:
             action = step["action"]
-
             if action == "type":
-                credential_key = step.get("credential")
-                text = email if credential_key == "email" else password
+                text = email if step.get("credential") == "email" else password
                 self.type_text(step["selector"], text)
-
             elif action == "click":
                 self.click(step["selector"])
-
             elif action == "wait":
                 time.sleep(step.get("seconds", 1))
-
         return f"Logged into {site}."
 
-    
-
     def save_credential(self, site: str, email: str, password: str) -> str:
-        """Sauvegarde les identifiants dans mara_credentials.enc (Fernet AES)."""
         return credentials.save(site, email, password)
 
-    def get_credential(self, site: str, field: str) -> str | None:
-        """Récupère un identifiant depuis mara_credentials.enc."""
-        if field == "email":
-            return credentials.get_email(site)
-        return credentials.get_password(site)
-
     def delete_credential(self, site: str) -> str:
-        """Supprime les identifiants d'un site."""
         return credentials.delete(site)
 
 
-
-browser = BrowserController.get_instance()
+browser = BrowserController()

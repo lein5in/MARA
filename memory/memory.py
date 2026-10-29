@@ -86,6 +86,25 @@ class Memory:
             return removed
         return None
 
+    def items(self) -> dict[str, list[str]]:
+        return {
+            "facts": list(self._data["user"]["facts"]),
+            "preferences": list(self._data["user"]["preferences"]),
+            "context": list(self._data["context"]),
+        }
+
+    def remove_matching(self, text: str) -> list[str]:
+        needle = text.lower().strip()
+        removed = []
+        for bucket in (self._data["user"]["facts"], self._data["user"]["preferences"], self._data["context"]):
+            for item in list(bucket):
+                if needle and needle in item.lower():
+                    bucket.remove(item)
+                    removed.append(item)
+        if removed:
+            self._save()
+        return removed
+
     def clear(self):
         pause = self._data.get("paused_until")
         self._data = _default_memory()

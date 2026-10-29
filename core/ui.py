@@ -1,7 +1,4 @@
 import re
-import json
-import queue
-import threading
 from datetime import datetime
 
 from PyQt5.QtWidgets import (
@@ -13,12 +10,10 @@ from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont, QColor, QPainter, QBrush
 from PyQt5.QtWebEngineWidgets import QWebEngineView
 
-from core.brain import _build_system_prompt  # noqa: F401
-from core.config import ANTHROPIC_API_KEY, MODEL_VISUAL, WIN_W, WIN_H
+from core import events as ev
+from core.config import WIN_W, WIN_H
 from core.log import get_logger
 log = get_logger(__name__)
-
-READ_ACTIONS = {"browser_read", "get_volume", "get_brightness", "wifi_status", "get_time"}
 
 BG_MAIN      = "#1c1c1e"
 BG_MSG_MARA  = "#2b2b2e"
@@ -304,9 +299,10 @@ class MessageBubble(QWidget):
         self._chips_row.addStretch()
 
 class MARAWindow(QWidget):
-    def __init__(self, text_queue: queue.Queue):
+    def __init__(self, submit):
         super().__init__()
-        self._text_queue = text_queue
+        self._submit = submit
+        self._chips: list[str] = []
         self._mode = "TEXT"
         self._pending: MessageBubble | None = None
         self._msg_count = 0
@@ -522,16 +518,8 @@ class MARAWindow(QWidget):
         text = self._input.text().strip()
         if not text:
             return
-        is_pwd = (self._input.echoMode() == QLineEdit.Password)
-        if self._mode == "VISION":
-            self._text_queue.put(f"__VISION__{text}")
-        else:
-            self._text_queue.put(text)
-        if not is_pwd:
-            self.on_user_message(text)
-        self._input.clear()
-        if is_pwd:
-            self.on_password_mode(False)
+        if self._submit(text, "typed"):
+            self._input.clear()
 
     def _add_bubble(self, bubble: MessageBubble):
         idx = self._log_layout.count() - 1
@@ -550,7 +538,6 @@ class MARAWindow(QWidget):
             "SPEAKING":    "#f2f2f2",
             "LISTENING":   "#9a9a9a",
             "PAUSED":      "#5a5a5a",
-            "OPERATIONAL": "#6b6b6b",
             "IDLE":        "#3a3a3d",
         }
         self._dot.set_color(colors.get(status, "#505050"))
@@ -583,14 +570,31 @@ class MARAWindow(QWidget):
         bubble = MessageBubble("YOU", text)
         self._add_bubble(bubble)
 
-    def on_password_mode(self, active: bool):
-        if active:
-            self._input.setEchoMode(QLineEdit.Password)
-            self._input.setPlaceholderText("Enter password (hidden)...")
-            self._input.setFocus()
-        else:
-            self._input.setEchoMode(QLineEdit.Normal)
-            self._input.setPlaceholderText("Message MARA...")
+    def on_event(self, event):
+        if isinstance(event, ev.TurnStarted):
+            self.on_user_message(event.text)
+            self._chips = []
+        elif isinstance(event, ev.TextDelta):
+            self.on_mara_stream_start()
+            self.on_mara_chunk(event.text)
+        elif isinstance(event, ev.ToolFinished):
+            self._chips.append(event.name if event.ok else f"{event.name} failed")
+        elif isinstance(event, ev.ConfirmationRequested):
+            self.on_mara_done(f"{event.title}: {event.description} Say yes or cancel.", [event.tool])
+        elif isinstance(event, ev.Error):
+            self.on_mara_done(event.message, [])
+        elif isinstance(event, ev.Done):
+            if self._pending or self._chips:
+                self.on_mara_done("", self._chips)
+            self._chips = []
+        elif isinstance(event, ev.Visual):
+            self.on_visual(event.html, event.title)
+        elif isinstance(event, ev.StateChanged):
+            self.on_status(event.state.value.upper())
+        elif isinstance(event, ev.ShowInterface):
+            self.show()
+        elif isinstance(event, ev.HideInterface):
+            self.hide()
 
     def on_visual(self, html: str, label: str):
         self._visual_win.show_html(html, label)
@@ -620,431 +624,19 @@ class MARAWindow(QWidget):
         self._drag_pos = None
 
 class MARAWorker(QThread):
-    sig_status        = pyqtSignal(str)
-    sig_stream_start  = pyqtSignal()
-    sig_chunk         = pyqtSignal(str)
-    sig_done          = pyqtSignal(str, list)
-    sig_user_msg      = pyqtSignal(str)
-    sig_password_mode = pyqtSignal(bool)
-    sig_show          = pyqtSignal()
-    sig_hide          = pyqtSignal()
-    sig_visual        = pyqtSignal(str, str)
+    sig_event = pyqtSignal(object)
 
-    _PWD_KW  = {"password", "mot de passe", "كلمة المرور", "pass"}
-    _OFFLINE = {
-        "fr": "Système en pause. Maintiens ENTRÉE et dis mon nom pour me réveiller.",
-        "en": "System offline. Hold Enter and say my name to wake me.",
-        "ar": "النظام في وضع الإيقاف. اضغط Enter وقل اسمي لإيقاظي.",
-    }
-    _WAKE = {"mara"}
-
-    _VISUAL_SYSTEM = """You are MARA's visual renderer. Generate a single self-contained HTML page that visually represents the requested data or concept.
-
-Rules:
-- Return ONLY raw HTML. No markdown, no code fences, no explanation.
-- Use inline CSS only. No external dependencies except Chart.js if needed for charts:
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
-- Dark theme: background #1e1e1e, text #e8e8e8, accents in subtle greys or soft blues.
-- Clean, minimal, professional design. Generous whitespace.
-- For charts: use Chart.js with dark styling.
-- For tables: clean borders, alternating row colors.
-- For diagrams/schemas: use SVG inline.
-- For summaries: structured layout with clear hierarchy.
-- The page must be fully rendered with no interactivity unless explicitly requested.
-- Start your response directly with <!DOCTYPE html>"""
-
-    def __init__(self, text_queue: queue.Queue):
+    def __init__(self):
         super().__init__()
-        self._q = text_queue
-        self._running = True
-        self._voice_q = queue.Queue()
+        from core.listener import listen
+        from core.session import Session
+        self.session = Session(self.sig_event.emit, listen_fn=listen)
 
-    def _voice_loop(self, listen_fn):
-        while self._running:
-            text = listen_fn()
-            if text:
-                self._voice_q.put(text)
-
-    def _get_input(self) -> tuple[str, str]:
-        while self._running:
-            try:
-                text = self._q.get_nowait()
-                return text, "ui"
-            except queue.Empty:
-                pass
-            try:
-                text = self._voice_q.get(timeout=0.05)
-                return text, "voice"
-            except queue.Empty:
-                pass
-        return "", "voice"
-
-    def _pause_loop(self, memory, system, speak_fn):
-        self.sig_status.emit("PAUSED")
-        while system.is_paused(memory) and self._running:
-            try:
-                text = self._q.get_nowait()
-                if any(w in text.lower() for w in self._WAKE):
-                    system.cancel_pause(memory)
-                    self.sig_status.emit("OPERATIONAL")
-                    speak_fn("I'm back.")
-                    return
-            except queue.Empty:
-                pass
-            try:
-                text = self._voice_q.get(timeout=0.1)
-                if any(w in text.lower() for w in self._WAKE):
-                    system.cancel_pause(memory)
-                    self.sig_status.emit("OPERATIONAL")
-                    speak_fn("I'm back.")
-                    return
-                else:
-                    lang = system._current_lang
-                    msg = self._OFFLINE.get(lang, self._OFFLINE["en"])
-                    speak_fn(msg)
-            except queue.Empty:
-                pass
-
-    def _handle_work_mode(self, language, speak_stream_fn, execute_fn,
-                          get_work_mode_ask, get_work_mode_launch):
-        ask_msg = get_work_mode_ask(language)
-        self.sig_done.emit(ask_msg, [])
-        log.debug(f"MARA : {ask_msg}")
-        speak_stream_fn(iter([ask_msg]))
-
-        user_input, source = self._get_input()
-        if source == "voice" and user_input:
-            self.sig_user_msg.emit(user_input)
-
-        skip = {"nothing", "none", "no", "rien", "non", "لا", "skip"}
-        is_skip = not user_input or any(w in user_input.lower() for w in skip)
-
-        actions = []
-        if not is_skip and user_input.strip():
-            clean = user_input.strip().rstrip(".,!?")
-            actions.append({"type": "open_with", "name": clean, "app": "code",
-                            "folder": "%USERPROFILE%", "is_folder": True})
-        else:
-            actions.append({"type": "run", "command": "code"})
-
-        actions.append({"type": "run", "command": "chrome"})
-        actions.append({"type": "run", "command": "msedge"})
-
-        has_file = not is_skip
-        launch_msg = get_work_mode_launch(language, has_file)
-        chips = [a.get("command", a.get("name", a.get("type", ""))) for a in actions]
-        self.sig_done.emit(launch_msg, chips)
-        log.debug(f"MARA : {launch_msg}")
-        speak_stream_fn(iter([launch_msg]))
-        execute_fn(actions)
-
-    def _handle_visual(self, prompt: str, speak_stream_fn):
-        from anthropic import Anthropic
-
-        self.sig_status.emit("THINKING")
-
-        thinking_msg = "Generating your visual, one moment."
-        self.sig_done.emit(thinking_msg, [])
-        speak_stream_fn(iter([thinking_msg]))
-
-        try:
-            client = Anthropic(api_key=ANTHROPIC_API_KEY)
-            response = client.messages.create(
-                model=MODEL_VISUAL,
-                max_tokens=4096,
-                system=self._VISUAL_SYSTEM,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            html = response.content[0].text.strip()
-
-            if html.startswith("```"):
-                html = re.sub(r'^```[a-z]*\n?', '', html)
-                html = re.sub(r'\n?```$', '', html)
-                html = html.strip()
-
-            label = prompt[:48] + ("..." if len(prompt) > 48 else "")
-
-            self.sig_visual.emit(html, label)
-
-            done_msg = "Here it is."
-            self.sig_done.emit(done_msg, [])
-            speak_stream_fn(iter([done_msg]))
-
-        except Exception as e:
-            err = f"Visual generation error: {e}"
-            log.debug(f"[Visual] {err}")
-            self.sig_done.emit(err, [])
-
-        self.sig_status.emit("OPERATIONAL")
+    def submit(self, text: str, source: str = "typed") -> bool:
+        return self.session.submit(text, source)
 
     def run(self):
-        from core.brain import ask_mara_stream, get_work_mode_ask, get_work_mode_launch
-        from core.listener import listen
-        from core.voice import speak, speak_stream_sentences
-        from core.executor import execute, needs_confirmation
-        from core import system
-        from memory.memory import Memory
-
-        memory = Memory()
-
-        voice_thread = threading.Thread(
-            target=self._voice_loop, args=(listen,), daemon=True
-        )
-        voice_thread.start()
-
-        while self._running:
-
-            if system.is_paused(memory):
-                self._pause_loop(memory, system, speak)
-                continue
-
-            user_input, source = self._get_input()
-
-            if system.is_paused(memory):
-                continue
-            if not user_input:
-                continue
-
-            if user_input.startswith("__CMD__"):
-                cmd = user_input.replace("__CMD__", "")
-                if cmd == "silent_toggle":
-                    user_input = "toggle silent mode"
-                else:
-                    continue
-
-            if user_input.startswith("__VISION__"):
-                prompt = user_input.replace("__VISION__", "").strip()
-                self._handle_vision(prompt, system, memory, speak_stream_sentences,
-                                   speak, execute, needs_confirmation, ask_mara_stream)
-                continue
-
-            if "quit" in user_input.lower():
-                speak("À bientôt.")
-                self._running = False
-                break
-
-            if source == "voice":
-                self.sig_user_msg.emit(user_input)
-
-            self.sig_status.emit("THINKING")
-            stream = ask_mara_stream(user_input)
-            first = next(stream, "")
-
-            if first.startswith("__WORK_MODE__"):
-                language = first.replace("__WORK_MODE__", "").strip() or "en"
-                self._handle_work_mode(language, speak_stream_sentences, execute,
-                                       get_work_mode_ask, get_work_mode_launch)
-                self.sig_status.emit("OPERATIONAL")
-                continue
-
-            if first.startswith("__UI_SHOW__"):
-                language = first.replace("__UI_SHOW__", "").strip() or "en"
-                from core.brain import MEMORY_RESPONSES
-                msg = MEMORY_RESPONSES["ui_show"].get(language, "Here I am.")
-                self.sig_show.emit()
-                self.sig_done.emit(msg, [])
-                log.debug(f"MARA : {msg}")
-                speak_stream_sentences(iter([msg]))
-                self.sig_status.emit("OPERATIONAL")
-                continue
-
-            if first.startswith("__UI_HIDE__"):
-                language = first.replace("__UI_HIDE__", "").strip() or "en"
-                from core.brain import MEMORY_RESPONSES
-                msg = MEMORY_RESPONSES["ui_hide"].get(language, "Going dark.")
-                self.sig_done.emit(msg, [])
-                log.debug(f"MARA : {msg}")
-                speak_stream_sentences(iter([msg]))
-                self.sig_hide.emit()
-                self.sig_status.emit("OPERATIONAL")
-                continue
-
-            if first.startswith("__VISION__"):
-                prompt = first.replace("__VISION__", "").strip()
-                self._handle_vision(prompt, system, memory, speak_stream_sentences,
-                                   speak, execute, needs_confirmation, ask_mara_stream)
-                self.sig_status.emit("IDLE")
-                continue
-
-            if first.startswith("__VISION_CODE__"):
-                prompt = first.replace("__VISION_CODE__", "").strip()
-                self._handle_vision_code(prompt, speak_stream_sentences)
-                self.sig_status.emit("IDLE")
-                continue
-
-            if first.startswith("__VISUAL__"):
-                prompt = first.replace("__VISUAL__", "").strip()
-                self._handle_visual(prompt, speak_stream_sentences)
-                continue
-
-            self.sig_stream_start.emit()
-            self._consume_stream(stream, first, system, memory, speak_stream_sentences,
-                                 speak, execute, needs_confirmation, ask_mara_stream)
-
-    def _consume_stream(self, stream, first, system, memory, speak_stream_sentences,
-                        speak, execute, needs_confirmation, ask_mara_stream):
-        full_response = first
-        self.sig_chunk.emit(first)
-
-        for chunk in stream:
-            if not self._running:
-                break
-            full_response += chunk
-            self.sig_chunk.emit(chunk)
-
-        if system.is_paused(memory):
-            self.sig_done.emit("", [])
-            return
-
-        actions = []
-        vocal = full_response
-
-        try:
-            m = re.search(r'\{.*"actions"\s*:.*\}', full_response, re.DOTALL)
-            if m:
-                parsed = json.loads(m.group())
-                if isinstance(parsed, dict) and "actions" in parsed:
-                    vocal = parsed.get("response", "")
-                    actions = parsed.get("actions", [])
-        except (json.JSONDecodeError, AttributeError):
-            pass
-
-        chips = []
-        for a in actions:
-            label = a.get("command") or a.get("site") or a.get("type", "")
-            if label:
-                chips.append(label)
-
-        if any(kw in vocal.lower() for kw in self._PWD_KW):
-            self.sig_password_mode.emit(True)
-
-        self.sig_done.emit(vocal, chips)
-        log.debug(f"MARA : {vocal or full_response}")
-
-        if vocal:
-            self.sig_status.emit("SPEAKING")
-            if actions:
-                speak_stream_sentences(iter([vocal]))
-            else:
-                speak_stream_sentences(iter([full_response]))
-
-        self.sig_status.emit("OPERATIONAL")
-
-        if not actions:
-            return
-
-        if needs_confirmation(actions):
-            confirm = "Cette action nécessite ta confirmation. Tu confirmes ?"
-            self.sig_done.emit(confirm, [])
-            log.debug(f"MARA : {confirm}")
-            speak(confirm)
-            reply, _ = self._get_input()
-            if not any(w in (reply or "").lower() for w in ["yes","oui","confirm","go","ok"]):
-                cancel = "Action annulée."
-                self.sig_done.emit(cancel, [])
-                log.debug(f"MARA : {cancel}")
-                speak(cancel)
-                return
-
-        results = execute(actions)
-
-        for action, result in zip(actions, results):
-            atype = action.get("type")
-
-            if atype == "browser_read" and result and not result.startswith("Erreur"):
-                self.sig_status.emit("THINKING")
-                self.sig_stream_start.emit()
-                summary_prompt = (f"Here is the content read from the browser. "
-                                  f"Summarize it naturally and briefly: {result}")
-                sr = ""
-                for chunk in ask_mara_stream(summary_prompt):
-                    sr += chunk
-                    self.sig_chunk.emit(chunk)
-                self.sig_done.emit(sr, [])
-                log.debug(f"MARA (lecture) : {sr}")
-                self.sig_status.emit("SPEAKING")
-                speak_stream_sentences(iter([sr]))
-                self.sig_status.emit("OPERATIONAL")
-
-            elif atype in READ_ACTIONS and result and not result.startswith("Erreur"):
-                self.sig_done.emit(result, [])
-                log.debug(f"MARA ({atype}) : {result}")
-                self.sig_status.emit("SPEAKING")
-                speak_stream_sentences(iter([result]))
-                self.sig_status.emit("OPERATIONAL")
-
-            elif atype == "pause" and result:
-                self.sig_done.emit(result, [])
-                log.debug(f"MARA (pause) : {result}")
-                speak_stream_sentences(iter([result]))
-
-            elif atype in ("silent_on", "silent_off") and result:
-                self.sig_done.emit(result, [])
-                log.debug(f"MARA ({atype}) : {result}")
-                speak_stream_sentences(iter([result]))
-
-    def _handle_vision(self, prompt, system, memory, speak_stream_sentences,
-                       speak, execute, needs_confirmation, ask_mara_stream):
-        from core import system as sys_mod
-        import base64
-
-        result = sys_mod.take_screenshot_for_vision()
-        if not result:
-            msg = "I can not take a screenshot right now."
-            self.sig_done.emit(msg, [])
-            log.debug(f"MARA : {msg}")
-            return
-
-        self.sig_status.emit("THINKING")
-
-        with open(result, "rb") as f:
-            img_b64 = base64.standard_b64encode(f.read()).decode("utf-8")
-
-        from core.brain import ask_mara_vision_stream
-        stream = ask_mara_vision_stream(prompt, img_b64)
-        first = next(stream, "")
-
-        self.sig_stream_start.emit()
-        self._consume_stream(stream, first, system, memory, speak_stream_sentences,
-                             speak, execute, needs_confirmation, ask_mara_stream)
-        self.sig_status.emit("IDLE")
-
-    def _handle_vision_code(self, prompt, speak_stream_sentences):
-        from core import system as sys_mod
-        import base64
-
-        result = sys_mod.take_screenshot_for_vision()
-        if not result:
-            msg = "I can not take a screenshot right now."
-            self.sig_done.emit(msg, [])
-            log.debug(f"MARA : {msg}")
-            return
-
-        self.sig_status.emit("THINKING")
-        thinking_msg = "Let me look at your code."
-        self.sig_done.emit(thinking_msg, [])
-        log.debug(f"MARA : {thinking_msg}")
-        speak_stream_sentences(iter([thinking_msg]))
-
-        with open(result, "rb") as f:
-            img_b64 = base64.standard_b64encode(f.read()).decode("utf-8")
-
-        from core.brain import ask_mara_vision_code
-        summary, html = ask_mara_vision_code(prompt, img_b64)
-
-        self.sig_stream_start.emit()
-        self.sig_chunk.emit(summary)
-        self.sig_done.emit(summary, [])
-        log.debug(f"MARA (vision code) : {summary}")
-
-        self.sig_status.emit("SPEAKING")
-        speak_stream_sentences(iter([summary]))
-
-        if html:
-            label = (prompt or "Code review")[:48]
-            self.sig_visual.emit(html, label)
-
-        self.sig_status.emit("IDLE")
+        self.session.run()
 
     def stop(self):
-        self._running = False
+        self.session.stop()

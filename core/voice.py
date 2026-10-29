@@ -82,6 +82,34 @@ def speak(text: str):
         system.set_speaking(False)
 
 
+class SpeechStream:
+    def __init__(self, speak_fn=None):
+        self._queue: queue.Queue = queue.Queue()
+        self._speak_fn = speak_fn or speak_stream_sentences
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _chunks(self):
+        while True:
+            chunk = self._queue.get()
+            if chunk is None:
+                return
+            yield chunk
+
+    def _run(self):
+        try:
+            self._speak_fn(self._chunks())
+        except Exception:
+            log.exception("[Voice] speech stream failed")
+
+    def feed(self, text: str):
+        self._queue.put(text)
+
+    def end(self, timeout: float | None = None):
+        self._queue.put(None)
+        self._thread.join(timeout)
+
+
 def speak_stream_sentences(text_generator):
     full_text = ""
 
