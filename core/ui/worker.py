@@ -1,6 +1,9 @@
+import threading
+
 from PyQt5.QtCore import QThread, pyqtSignal
 
 from core import system
+from core.config import WARMUP_REQUEST
 from core.events import ModeChanged
 from core.session import Session
 
@@ -11,9 +14,10 @@ class MARAWorker(QThread):
     def __init__(self, session: Session | None = None, listener=None):
         super().__init__()
         self.listener = listener
+        self.session = session or Session(self.sig_event.emit, listen_fn=listener.listen if listener else None)
         if listener is not None:
             listener.set_event_hook(self.sig_event.emit)
-        self.session = session or Session(self.sig_event.emit, listen_fn=listener.listen if listener else None)
+            listener.set_barge_in(self.session.barge_in)
 
     def submit(self, text: str):
         self.session.submit(text, "typed")
@@ -33,6 +37,8 @@ class MARAWorker(QThread):
         self.sig_event.emit(ModeChanged(system.is_silent(), system.is_vision()))
 
     def run(self):
+        if WARMUP_REQUEST and hasattr(self.session, "agent"):
+            threading.Thread(target=self.session.agent.warm_up, daemon=True, name="mara-warmup").start()
         self.session.run()
 
     def stop(self):

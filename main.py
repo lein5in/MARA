@@ -38,6 +38,7 @@ def main():
     visual = VisualWindow()
     orb = MARAOrb()
     worker = MARAWorker(listener=listener)
+    listener.start()
 
     def on_event(event):
         window.on_event(event)

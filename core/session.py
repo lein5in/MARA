@@ -1,7 +1,7 @@
 import queue
 import threading
 
-from core import system
+from core import system, metrics
 from core.brain import Agent, ConfirmationBroker
 from core.config import TRIGGER_KEY
 from core.events import (
@@ -42,8 +42,8 @@ class NullSpeech:
 
 
 def _default_speech():
-    from core.voice import SpeechStream
-    return SpeechStream()
+    from core.voice import make_speech
+    return make_speech()
 
 
 def _default_say(text: str):
@@ -71,6 +71,7 @@ class Session:
         self._quit_pending = False
         self._was_paused = False
         self.busy = False
+        self._barged = False
 
     def submit(self, text: str, source: str = "typed") -> bool:
         text = (text or "").strip()
@@ -99,12 +100,24 @@ class Session:
         self.running = False
         self.broker.cancel_all()
         self.agent.cancel()
+        self._speech.cancel()
+
+    def barge_in(self):
+        if not self.busy and isinstance(self._speech, NullSpeech):
+            return False
+        log.info("[Session] Barge-in: stopping speech and the current request.")
+        self._barged = True
+        self._speech.cancel()
+        if self.busy:
+            self.agent.cancel()
+        return True
 
     def _on_agent_event(self, event):
         if isinstance(event, QuitRequested):
             self._quit_pending = True
             return
         if isinstance(event, TextDelta):
+            metrics.mark("first_token")
             self._speech.feed(event.text)
             if not self._speaking and not system.is_silent():
                 self._speaking = True
@@ -128,20 +141,27 @@ class Session:
             threading.Thread(target=self._voice_loop, daemon=True, name="mara-voice").start()
 
     def run_turn(self, text: str, source: str):
+        if source != "voice" or not metrics.active():
+            metrics.start(source)
         self.emit(TurnStarted(text, source))
         self._speaking = False
+        self._barged = False
         self._speech = NullSpeech() if system.is_silent() else self.speech_factory()
         self.busy = True
         try:
             self.agent.run_turn(text, source)
         finally:
             self.busy = False
-            speech, self._speech = self._speech, NullSpeech()
-            speech.end()
+            self._speech.end()
+            self._speech = NullSpeech()
             self._speaking = False
+            metrics.finish()
         if self._quit_pending:
             self.running = False
             self.emit(QuitRequested())
+            return
+        if self._barged:
+            self._barged = False
             return
         self.emit(StateChanged(State.PAUSED if system.is_paused(self.memory) else State.IDLE))
 

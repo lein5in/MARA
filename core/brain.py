@@ -5,10 +5,10 @@ from datetime import datetime
 
 from anthropic import Anthropic
 from memory.memory import Memory
-from core import system
 from core.config import (
     ANTHROPIC_API_KEY, USER_NAME, MODEL_MAIN, MODEL_FAST, PROFILE_PATH, PROFILE_EXAMPLE_PATH,
     MAX_HISTORY_TURNS, MAX_TOOL_ITERATIONS, MAX_TOKENS, API_TIMEOUT, API_MAX_RETRIES, CONFIRM_TIMEOUT,
+    PROMPT_CACHE,
 )
 from core.events import (
     TextDelta, ToolStarted, ToolFinished, ConfirmationRequested, ConfirmationResolved,
@@ -84,8 +84,6 @@ Rules:
 - Do not memorize questions, commands, or general conversation.
 - Never memorize passwords, codes or secrets.
 - Always reformulate the info in the third person."""
-
-LANGUAGE_PROMPT = """Detect the language of the user's message. Reply with exactly one word, nothing else: fr, en, or ar."""
 
 INTERRUPTED_NOTE = "(reply interrupted: {reason})"
 
@@ -207,6 +205,17 @@ class Cancelled(Exception):
     pass
 
 
+def _log_usage(message):
+    usage = getattr(message, "usage", None)
+    if usage is None:
+        return
+    log.debug(
+        f"[Cache] read={getattr(usage, 'cache_read_input_tokens', 0) or 0} "
+        f"write={getattr(usage, 'cache_creation_input_tokens', 0) or 0} "
+        f"input={getattr(usage, 'input_tokens', 0)} output={getattr(usage, 'output_tokens', 0)}"
+    )
+
+
 class Agent:
     def __init__(self, client=None, registry=None, memory=None, emit=None, broker=None,
                  model: str = MODEL_MAIN, max_iterations: int = MAX_TOOL_ITERATIONS,
@@ -248,8 +257,8 @@ class Agent:
         if self.broker:
             self.broker.cancel_all()
 
-    def system_prompt(self) -> str:
-        parts = [BASE_SYSTEM_PROMPT]
+    def dynamic_context(self) -> str:
+        parts = []
         memory_context = self.memory.get_context_for_prompt()
         if memory_context:
             parts.append(memory_context)
@@ -257,17 +266,36 @@ class Agent:
         parts.append(f"Current local time: {now.strftime('%A %d %B %Y, %H:%M')} (UTC{now.strftime('%z')}).")
         return "\n\n".join(parts)
 
+    def system_prompt(self) -> str:
+        return f"{BASE_SYSTEM_PROMPT}\n\n{self.dynamic_context()}"
+
+    def system_blocks(self) -> list[dict]:
+        static = {"type": "text", "text": BASE_SYSTEM_PROMPT}
+        if PROMPT_CACHE:
+            static["cache_control"] = {"type": "ephemeral"}
+        return [static, {"type": "text", "text": self.dynamic_context()}]
+
     def _request(self, messages: list[dict], force_text: bool) -> dict:
         kwargs = dict(
             model=self.model,
             max_tokens=MAX_TOKENS,
-            system=self.system_prompt(),
+            system=self.system_blocks(),
             tools=self.registry.get_schemas(),
             messages=messages,
         )
         if force_text:
             kwargs["tool_choice"] = {"type": "none"}
         return kwargs
+
+    def warm_up(self):
+        try:
+            response = self.client.messages.create(
+                model=self.model, max_tokens=1, system=self.system_blocks(), tools=self.registry.get_schemas(),
+                messages=[{"role": "user", "content": "ping"}],
+            )
+            _log_usage(response)
+        except Exception as e:
+            log.warning(f"[Agent] Warm-up request failed: {e}")
 
     def _stream(self, messages: list[dict], force_text: bool, state: dict):
         with self.client.messages.stream(**self._request(messages, force_text)) as stream:
@@ -281,6 +309,7 @@ class Agent:
                 state["partial"] += text
                 self._emit(TextDelta(text))
             final = stream.get_final_message()
+        _log_usage(final)
         if self._cancel.is_set():
             raise Cancelled()
         return final
@@ -345,8 +374,6 @@ class Agent:
         spoken: list[str] = []
         state = {"partial": "", "spoke": False}
         self._emit(StateChanged(State.THINKING))
-        if self.background:
-            threading.Thread(target=self._detect_language, args=(user_text,), daemon=True).start()
         ok = False
         try:
             for iteration in range(self.max_iterations + 1):
@@ -396,16 +423,6 @@ class Agent:
                 log.info("[Session] History cleared.")
                 return
             self.history = trim_history(self.history + turn, self.max_turns)
-
-    def _detect_language(self, user_text: str):
-        try:
-            response = self.client.messages.create(
-                model=MODEL_FAST, max_tokens=5, system=LANGUAGE_PROMPT,
-                messages=[{"role": "user", "content": user_text}],
-            )
-            system.set_current_lang(response.content[0].text.strip().lower())
-        except Exception as e:
-            log.warning(f"[Language] Detection failed: {e}")
 
     def _extract_and_save(self, user_text: str):
         try:
