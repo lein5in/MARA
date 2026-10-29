@@ -14,7 +14,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-Required `.env` keys (gitignored): `ANTHROPIC_API_KEY`, `FISH_API_KEY`, `USER_NAME`. Whisper runs on CUDA (PyTorch). The push-to-talk trigger is the `f13` key (`TRIGGER_KEY` in `core/listener.py`), bound to a mouse button. `launch_mara.bat/.vbs`, `assets/app_registry.json` and the `memory/*.enc`/`mara.key` files are machine-specific and gitignored.
+Required `.env` keys (gitignored): `ANTHROPIC_API_KEY`, `FISH_API_KEY`, `USER_NAME`. Whisper runs on CUDA (PyTorch). The push-to-talk trigger is the `f13` key (`TRIGGER_KEY` in `core/config.py`), bound to a mouse button. User data (`mara.key`, `*.enc`, `app_registry.json`, `profile.md`) lives in `%APPDATA%\MARA` (`DATA_DIR` in `core/config.py`), seeded from the old in-repo copies at startup; `launch_mara.bat/.vbs` and any legacy in-repo copies are machine-specific and gitignored.
 
 ## Architecture
 

@@ -3,6 +3,7 @@ import json
 from datetime import datetime
 from cryptography.fernet import Fernet
 from core.config import USER_NAME, MEMORY_PATH as MEMORY_FILE, KEY_PATH as KEY_FILE
+from core.storage import atomic_write_bytes
 from core.log import get_logger
 log = get_logger(__name__)
 
@@ -12,8 +13,7 @@ def _load_or_create_key() -> Fernet:
             key = f.read()
     else:
         key = Fernet.generate_key()
-        with open(KEY_FILE, "wb") as f:
-            f.write(key)
+        atomic_write_bytes(KEY_FILE, key)
         log.info("Nouvelle clé mémoire générée.")
     return Fernet(key)
 
@@ -59,8 +59,7 @@ class Memory:
         self._data["last_updated"] = datetime.now().isoformat()
         raw = json.dumps(self._data, ensure_ascii=False, indent=2).encode("utf-8")
         encrypted = _fernet.encrypt(raw)
-        with open(MEMORY_FILE, "wb") as f:
-            f.write(encrypted)
+        atomic_write_bytes(MEMORY_FILE, encrypted)
 
     def add_fact(self, fact: str):
         fact = fact.strip()
@@ -146,6 +145,3 @@ class Memory:
             "and only if directly relevant to their current message): "
             + memory_text
         )
-
-    def debug(self):
-        log.debug(f"Memory sections: {list(self._data.keys())}")

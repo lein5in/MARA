@@ -4,30 +4,28 @@ import threading
 from anthropic import Anthropic
 from memory.memory import Memory
 from core import system
-from core.config import ANTHROPIC_API_KEY, USER_NAME, MODEL_MAIN, MODEL_FAST, MAX_HISTORY
+from core.config import ANTHROPIC_API_KEY, USER_NAME, MODEL_MAIN, MODEL_FAST, MAX_HISTORY, PROFILE_PATH, PROFILE_EXAMPLE_PATH
+from core.storage import copy_if_missing
 from core.log import get_logger
 log = get_logger(__name__)
+startup_log = get_logger("startup")
 
 client = Anthropic(api_key=ANTHROPIC_API_KEY)
 
-ABOUT_USER = f"""
-ABOUT {USER_NAME}
-- Computer Science student (Specialized, Co-op) at the University of Ottawa, class of 2028.
-- International Student Merit Scholarship recipient.
-- Coursework: Data Structures and Algorithms, Computer Architecture, Software Engineering.
-- Worked as a Data Annotation & AI Training Specialist (DataAnnotation, remote) — annotated ML datasets, built Python automation scripts, analyzed model outputs.
-- Builder of multiple full-stack and AI projects: MARA (this assistant), Fretify (audio-to-guitar-tab AI app), Seren (Chrome extension AI study toolbar with FastAPI/React/PostgreSQL backend).
-- Skilled in Java, Python, JavaScript, TypeScript, SQL, React, FastAPI, PyQt5, Selenium, CUDA/GPU inference.
-- Bilingual: English and French.
-- Loves programming and deep thinking — genuinely enjoys reasoning through problems, not just shipping code.
+def _load_profile() -> str:
+    if not PROFILE_PATH.exists():
+        if copy_if_missing(PROFILE_EXAMPLE_PATH, PROFILE_PATH):
+            log.warning(f"profile.md missing, created from profile.example.md: {PROFILE_PATH}")
+        else:
+            log.warning(f"profile.md missing and no template available: {PROFILE_PATH}")
+            return ""
+    text = PROFILE_PATH.read_text(encoding="utf-8").strip().replace("{USER_NAME}", USER_NAME)
+    return f"\n{text}\n"
 
-PERSONALITY ADJUSTMENT FOR {USER_NAME}
-- Be conversational and genuinely interested in what {USER_NAME} is doing, not just transactional.
-- Tease {USER_NAME} often, light and friendly mockery — like a close friend who knows him well, not an assistant.
-- Do not ask unnecessary clarifying questions when context is already known or guessable. Make a reasonable assumption and move forward.
-"""
+ABOUT_USER = _load_profile()
 
 memory = Memory()
+startup_log.info("Memory loaded")
 
 BASE_SYSTEM_PROMPT = f"""You are MARA (Modular Adaptive Response Assistant), the personal vocal assistant of {USER_NAME}.
 

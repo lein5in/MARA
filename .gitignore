@@ -20,7 +20,8 @@ build/
 # VS Code
 .vscode/
 
-# Mémoire MARA (données personnelles)
+# Mémoire MARA (données personnelles) — données actuelles dans %APPDATA%\MARA, ces lignes couvrent les anciennes copies
+profile.md
 memory/mara.key
 memory/mara_memory.enc
 memory/mara_credentials.enc

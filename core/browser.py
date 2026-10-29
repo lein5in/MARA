@@ -1,6 +1,4 @@
-import os
 import time
-from pathlib import Path
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -8,7 +6,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import WebDriverException
 from memory.credentials import credentials
-from core.config import BROWSER_TIMEOUT
+from core.config import BROWSER_TIMEOUT, CHROME_PROFILE_DIR
 from core.log import get_logger
 log = get_logger(__name__)
 
@@ -85,7 +83,7 @@ class BrowserController:
         options = Options()
 
         
-        mara_profile = Path(os.environ.get("LOCALAPPDATA", "")) / "MARA" / "ChromeProfile"
+        mara_profile = CHROME_PROFILE_DIR
         mara_profile.mkdir(parents=True, exist_ok=True)
         options.add_argument(f"--user-data-dir={mara_profile}")
 

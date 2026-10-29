@@ -39,13 +39,6 @@ BLACKLIST_PATH_FRAGMENTS = [
 ]
 
 
-BASENAME_FILTER = (
-    "uninstall|setup|install|update|crash|helper|register|repair|"
-    "installer|updater|patcher|cleanup|touchup|elevat|proxy|hook|"
-    "surrogate|injector|broker|launcher_helper|_rules|errorreporter"
-)
-
-
 VERSIONED_APPS = {
     "discord": {
         "search_path": Path(os.environ.get("LOCALAPPDATA", "")) / "Discord",

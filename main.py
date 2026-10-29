@@ -9,15 +9,17 @@ from core.app_registry import get_registry
 from core.log import get_logger
 
 log = get_logger(__name__)
+startup_log = get_logger("startup")
 
 def main():
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
 
-    log.info("MARA initialisée.")
-    log.info("Scan des applications...")
-    get_registry()
+    startup_log.info("MARA starting...")
+    startup_log.info("Scanning applications...")
+    registry = get_registry()
+    startup_log.info(f"{len(registry)} applications indexed")
 
     text_queue = queue.Queue()
 

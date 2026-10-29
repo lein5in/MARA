@@ -1,6 +1,7 @@
 import json
 from cryptography.fernet import Fernet
 from core.config import KEY_PATH, CREDENTIALS_PATH
+from core.storage import atomic_write_bytes
 from core.log import get_logger
 log = get_logger(__name__)
 
@@ -27,7 +28,7 @@ class CredentialsManager:
         if KEY_PATH.exists():
             return KEY_PATH.read_bytes()
         key = Fernet.generate_key()
-        KEY_PATH.write_bytes(key)
+        atomic_write_bytes(KEY_PATH, key)
         log.info("[Credentials] Clé générée.")
         return key
 
@@ -46,7 +47,7 @@ class CredentialsManager:
     def _save(self):
         raw = json.dumps(self._data, ensure_ascii=False).encode()
         encrypted = self._fernet.encrypt(raw)
-        CREDENTIALS_PATH.write_bytes(encrypted)
+        atomic_write_bytes(CREDENTIALS_PATH, encrypted)
 
     
 

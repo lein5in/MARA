@@ -9,9 +9,10 @@ import keyboard
 from core.config import TRIGGER_KEY, WHISPER_MODEL, STT_SAMPLE_RATE as SAMPLE_RATE, STT_CHUNK_SIZE as CHUNK_SIZE
 from core.log import get_logger
 log = get_logger(__name__)
+startup_log = get_logger("startup")
 
 
-log.info("Chargement de Whisper...")
+startup_log.info("Loading Whisper...")
 model = None
 _model_ready = threading.Event()
 
@@ -19,7 +20,8 @@ def _load_whisper():
     global model
     model = whisper.load_model(WHISPER_MODEL)
     _model_ready.set()
-    log.info("Whisper prêt.")
+    startup_log.info(f"Whisper ready ({model.device.type})")
+    startup_log.info(f"Ready. Hold {TRIGGER_KEY.upper()} to speak.")
 
 threading.Thread(target=_load_whisper, daemon=True).start()
 

@@ -7,6 +7,8 @@ LOG_DIR = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Loca
 LOG_FILE = LOG_DIR / "mara.log"
 FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 
+STARTUP_LOGGER = "mara.startup"
+
 _configured = False
 
 
@@ -27,10 +29,17 @@ def setup_logging():
     file_handler.setFormatter(formatter)
     root.addHandler(file_handler)
 
+    startup = logging.StreamHandler()
+    startup.setLevel(logging.INFO)
+    startup.setFormatter(logging.Formatter("%(message)s"))
+    startup.addFilter(lambda r: r.name == STARTUP_LOGGER)
+    root.addHandler(startup)
+
     if os.getenv("MARA_DEBUG") == "1":
         console = logging.StreamHandler()
         console.setLevel(logging.DEBUG)
         console.setFormatter(formatter)
+        console.addFilter(lambda r: r.name != STARTUP_LOGGER)
         root.addHandler(console)
 
 
