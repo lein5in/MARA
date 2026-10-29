@@ -42,3 +42,5 @@ assets/app_registry.json
 debug.log
 *.log
 .ruff_cache/
+
+CLAUDE.md
