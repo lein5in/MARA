@@ -2,29 +2,32 @@
 venv/
 env/
 
-# Variables d'environnement
+# Variables d'environnement et secrets
 .env
-
-# Config et secrets
 /config.py
 secrets.json
 
 # Python
 __pycache__/
 *.py[cod]
-*.pyo
 *.egg-info/
 dist/
 build/
+.pytest_cache/
+.ruff_cache/
 
-# VS Code
+# Éditeurs et outils
 .vscode/
+.claude/
+CLAUDE.md
 
 # Mémoire MARA (données personnelles) — données actuelles dans %APPDATA%\MARA, ces lignes couvrent les anciennes copies
 profile.md
-memory/mara.key
-memory/mara_memory.enc
-memory/mara_credentials.enc
+*.enc
+*.key
+*.key.bak
+*.key.dpapi
+assets/app_registry.json
 
 # Audio temporaire
 *.wav
@@ -37,10 +40,12 @@ Screenshots/
 launch_mara.bat
 launch_mara.vbs
 
-assets/app_registry.json
 # Logs
-debug.log
 *.log
-.ruff_cache/
 
-CLAUDE.md
+# Vidéo promo
+promo-video/
+
+# Docs : seules les captures sont publiques
+docs/*
+!docs/screenshots/

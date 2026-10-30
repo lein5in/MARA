@@ -32,7 +32,7 @@ def main():
     from core.ui.visual import VisualWindow
     from core.ui.worker import MARAWorker
     from core.orb import MARAOrb
-    from core import listener, shutdown
+    from core import listener, shutdown, voice
     from core.tools import vision_tools, browser_tools
     from core.ui.secret import ask_password
 
@@ -45,6 +45,7 @@ def main():
     window = MainWindow()
     visual = VisualWindow()
     orb = MARAOrb()
+    orb.set_output_level_source(voice.output_level)
     worker = MARAWorker(listener=listener)
     listener.start()
 
@@ -52,6 +53,8 @@ def main():
         window.on_event(event)
         if isinstance(event, ev.StateChanged):
             orb.set_state(event.state.value)
+        elif isinstance(event, ev.MicLevel):
+            orb.set_level(event.level)
         elif isinstance(event, ev.Visual):
             visual.show_html(event.html, event.title)
         elif isinstance(event, ev.QuitRequested):

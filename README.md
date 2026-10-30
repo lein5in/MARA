@@ -9,6 +9,14 @@
 
 MARA lives on your machine. You hold a button (F13, mapped to a mouse button), speak, and release. Whisper transcribes locally on the GPU, Claude Sonnet decides what to do with native tool calls (open apps, change the volume, read a web page, look at your screen, remember things), and Fish Audio speaks the answer while it is still being written. A terminal-style chat window shows the conversation, the actions MARA ran, and any code she suggests.
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/chat-actions.png" width="48%" alt="Chat with action receipts: MARA opens Notepad, types in a new tab and gives the time in Paris">
+  <img src="docs/screenshots/code-review.png" width="48%" alt="Code review: MARA reads the code on screen and suggests a fix as a diff">
+</p>
+<p align="center"><sub>Left: voice request with one receipt per action. Right: <code>look_at_screen</code> reviews the code on screen and answers with a diff.</sub></p>
+
 ## How it works
 
 ```mermaid
@@ -97,7 +105,7 @@ On the first start after updating, the old plaintext `mara.key` is moved to DPAP
 
 ## Configuration flags (`core/config.py`)
 
-| Flag | Default | Effect when False |
+| Flag | Default | Effect when changed from the default |
 |---|---|---|
 | `STREAMING_TTS` | True | Speak sentence by sentence, one Fish request each (slower, older path) |
 | `PERSISTENT_AUDIO_OUT` | True | Open the speaker stream for each reply |
@@ -106,7 +114,7 @@ On the first start after updating, the old plaintext `mara.key` is moved to DPAP
 | `PROMPT_CACHE` | True | No prompt caching |
 | `WARMUP_REQUEST` | True | No tiny API request at startup |
 | `LIVE_TRANSCRIPTION` | True | No partial transcript while you speak |
-| `ORB_IDLE_VISIBLE` | True | The orb fades out when idle |
+| `ORB_IDLE_VISIBLE` | False | The orb stays visible, dimmed, when idle (by default it appears only when MARA listens, thinks or speaks) |
 | `START_HIDDEN` | True | The window opens at launch |
 
 ## Troubleshooting

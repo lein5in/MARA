@@ -31,6 +31,13 @@ def _tts_config(fmt: str = "wav") -> TTSConfig:
     return TTSConfig(reference_id=VOICE_ID, format="wav", latency="balanced")
 
 
+def _rms_level(samples: np.ndarray) -> float:
+    if samples.size == 0:
+        return 0.0
+    rms = float(np.sqrt(np.mean((samples.astype(np.float32) / 32768.0) ** 2)))
+    return min(1.0, rms * 5.0)
+
+
 class AudioOut:
     def __init__(self, persistent: bool = True):
         self.persistent = persistent
@@ -42,6 +49,7 @@ class AudioOut:
         self._generation = 0
         self._pending = 0
         self._closed = False
+        self.level = 0.0
         self._thread = threading.Thread(target=self._run, daemon=True, name="mara-audio-out")
         self._thread.start()
 
@@ -71,7 +79,9 @@ class AudioOut:
                     with self._lock:
                         stream = self._open()
                         metrics.mark("first_audio")
-                        stream.write(np.frombuffer(pcm, dtype=np.int16))
+                        samples = np.frombuffer(pcm, dtype=np.int16)
+                        self.level = _rms_level(samples)
+                        stream.write(samples)
                 except Exception as e:
                     log.warning(f"[Audio] playback failed: {e}")
             self._done_one()
@@ -85,6 +95,7 @@ class AudioOut:
             if idle and not self.persistent:
                 self._release()
         if idle:
+            self.level = 0.0
             system.set_speaking(False)
             self._idle.set()
 
@@ -102,6 +113,7 @@ class AudioOut:
                 self._queue.put((self._generation, piece))
 
     def clear(self):
+        self.level = 0.0
         with self._lock:
             self._generation += 1
             if self._stream is not None:
@@ -129,6 +141,10 @@ def audio_out() -> AudioOut:
     if _audio_out is None:
         _audio_out = AudioOut(persistent=PERSISTENT_AUDIO_OUT)
     return _audio_out
+
+
+def output_level() -> float:
+    return _audio_out.level if _audio_out is not None else 0.0
 
 
 def close_audio():

@@ -1,5 +1,6 @@
 import copy
 import itertools
+import threading
 from types import SimpleNamespace
 
 _ids = itertools.count(1)
@@ -9,24 +10,43 @@ def reply(*texts, stop_reason="end_turn"):
     return {"texts": list(texts), "tools": [], "stop_reason": stop_reason}
 
 
-def tool_call(name, args=None, *texts, more=None):
+def tool_call(name, args=None, *texts, more=None, stop_reason="tool_use"):
     tools = [(name, args or {})] + list(more or [])
-    return {"texts": list(texts), "tools": tools, "stop_reason": "tool_use"}
+    return {"texts": list(texts), "tools": tools, "stop_reason": stop_reason}
 
 
 def fail(exc, *texts_before):
     return {"texts": list(texts_before), "error": exc}
 
 
+def hang(*texts_before):
+    return {"texts": list(texts_before), "tools": [], "stop_reason": "end_turn", "hang": True}
+
+
 class FakeStream:
     def __init__(self, spec):
         self.spec = spec
+        self.closed = threading.Event()
 
     def __enter__(self):
         return self
 
     def __exit__(self, *exc):
         return False
+
+    def close(self):
+        self.closed.set()
+
+    def __iter__(self):
+        for t in self.spec["texts"]:
+            yield SimpleNamespace(type="text", text=t)
+        for _ in self.spec.get("tools", []):
+            yield SimpleNamespace(type="input_json", partial_json="{}")
+        if self.spec.get("hang"):
+            self.closed.wait(10)
+            raise ConnectionError("stream closed")
+        if "error" in self.spec:
+            raise self.spec["error"]
 
     @property
     def text_stream(self):

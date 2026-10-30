@@ -28,7 +28,7 @@ def test_corrupt_file_is_backed_up_and_memory_starts_empty(tmp_path, fernet):
     backups = list(tmp_path.glob("mara_memory.enc.*.corrupt"))
     assert len(backups) == 1 and backups[0].read_bytes() == b"not encrypted at all"
     assert path.read_bytes() == b"not encrypted at all"
-    store.add_fact("Habib studies computer science")
+    store.add_fact("Alex studies computer science")
     assert backups[0].exists()
 
 
@@ -77,11 +77,11 @@ def test_caps_and_timestamps(tmp_path, fernet):
 
 def test_near_duplicates_are_consolidated(tmp_path, fernet):
     store = MemoryStore(tmp_path / "m.enc", fernet)
-    store.add_fact("Habib is a computer science co-op student")
-    store.add_fact("Habib is a computer science co-op student.")
-    store.add_fact("Habib is a Computer Science co-op student at Concordia")
+    store.add_fact("Alex is a computer science co-op student")
+    store.add_fact("Alex is a computer science co-op student.")
+    store.add_fact("Alex is a Computer Science co-op student at Example University")
     store.add_preference("Prefers short answers")
-    assert store.items()["facts"] == ["Habib is a Computer Science co-op student at Concordia"]
+    assert store.items()["facts"] == ["Alex is a Computer Science co-op student at Example University"]
     assert store.items()["preferences"] == ["Prefers short answers"]
 
 

@@ -22,7 +22,12 @@ OFFLINE = {
     "ar": f"أنا في وضع الإيقاف المؤقت. اضغط {TRIGGER_KEY.upper()} وقل اسمي لإيقاظي.",
 }
 BACK = {"fr": "Je suis de retour.", "en": "I'm back.", "ar": "لقد عدت."}
-CONFIRM_HINT = "Waiting for your confirmation: say yes or cancel, or use the buttons."
+TURN_FAILED = {
+    "fr": "Désolée, quelque chose a échoué. Le détail est dans la fenêtre.",
+    "en": "Sorry, something went wrong. The details are in the window.",
+    "ar": "عذرًا، حدث خطأ. التفاصيل في النافذة.",
+}
+CONFIRM_HINT ="Waiting for your confirmation: say yes or cancel, or use the buttons."
 
 
 def localized(table: dict, lang: str | None = None) -> str:
@@ -71,6 +76,7 @@ class Session:
         self._was_paused = False
         self.busy = False
         self._barged = False
+        self._turn_failed = False
 
     def submit(self, text: str, source: str = "typed") -> bool:
         text = (text or "").strip()
@@ -122,7 +128,9 @@ class Session:
         if isinstance(event, QuitRequested):
             self._quit_pending = True
             return
-        if isinstance(event, TextDelta):
+        if isinstance(event, Error):
+            self._turn_failed = True
+        elif isinstance(event, TextDelta):
             metrics.mark("first_token")
             self._speech.feed(event.text)
             if not self._speaking and not system.is_silent():
@@ -175,6 +183,7 @@ class Session:
         self.emit(TurnStarted(text, source))
         self._speaking = False
         self._barged = False
+        self._turn_failed = False
         self._speech = NullSpeech() if system.is_silent() else self.speech_factory()
         self.busy = True
         try:
@@ -195,7 +204,13 @@ class Session:
         if self._barged:
             self._barged = False
             return
+        if self._turn_failed and not failed:
+            self._say_failure()
         self.emit(StateChanged(self.rest_state()))
+
+    def _say_failure(self):
+        if not system.is_silent():
+            self._say(localized(TURN_FAILED))
 
     def _say(self, text: str):
         self.emit(StateChanged(State.SPEAKING))
@@ -234,6 +249,7 @@ class Session:
         except Exception:
             log.exception("[Session] turn crashed")
             self.emit(Error("Something went wrong in that turn. I'm still here."))
+            self._say_failure()
             self.emit(StateChanged(State.IDLE))
         return True
 

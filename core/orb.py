@@ -1,92 +1,89 @@
 import math
-import random
+import time
+
+from PyQt5.QtCore import Qt, QTimer, QPointF
+from PyQt5.QtGui import QPainter, QColor, QRadialGradient, QConicalGradient, QPen, QBrush
 from PyQt5.QtWidgets import QWidget, QApplication
-from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QPainter, QColor, QRadialGradient, QPen, QBrush
+
 from core.config import ORB_SIZE, ORB_IDLE_VISIBLE
 
+FRAME_MS = 16
+FADE_SECONDS = 0.3
+LINGER_SECONDS = 1.5
+IDLE_OPACITY = 0.45
+RIPPLE_LIFE = 1.2
+OUTPUT_SILENCE = 0.5
 
-ORB_R    = 77
-CX       = ORB_SIZE / 2
-CY       = ORB_SIZE / 2
+CX = CY = ORB_SIZE / 2
+R = ORB_SIZE * 0.27
+DOT_COUNT = 140
+TILT = 0.38
 
-FADE_STEPS = 20
-
-
-def _palette(front, back, edge_f, edge_b, pulse, inner, outer):
-    return {
-        "node_front": QColor(*front), "node_back": QColor(*back),
-        "edge_front": QColor(*edge_f), "edge_back": QColor(*edge_b),
-        "pulse": QColor(*pulse), "bg_inner": QColor(*inner), "bg_outer": QColor(*outer), "rim": QColor(*front),
-    }
-
-
-STATE_COLORS = {
-    "LISTENING": _palette((232, 160, 180), (90, 45, 60), (190, 120, 140), (60, 30, 40), (245, 190, 205), (24, 10, 15), (12, 5, 8)),
-    "THINKING": _palette((214, 170, 220), (70, 45, 80), (170, 130, 180), (45, 30, 55), (235, 205, 240), (18, 10, 24), (9, 5, 12)),
-    "SPEAKING": _palette((245, 180, 198), (110, 55, 72), (220, 140, 162), (70, 35, 46), (255, 215, 225), (28, 12, 18), (14, 6, 9)),
-    "WAITING_CONFIRMATION": _palette((229, 181, 103), (90, 70, 35), (190, 150, 85), (60, 45, 22), (240, 205, 140), (24, 18, 8), (12, 9, 4)),
-    "IDLE": _palette((150, 105, 118), (50, 32, 38), (110, 75, 86), (35, 22, 27), (170, 120, 135), (14, 8, 11), (7, 4, 6)),
-    "PAUSED": _palette((110, 116, 130), (40, 42, 48), (80, 85, 96), (28, 30, 34), (130, 136, 150), (10, 11, 13), (5, 5, 6)),
+PALETTES = {
+    "LISTENING": ((232, 160, 180), (34, 13, 22)),
+    "THINKING": ((206, 170, 228), (25, 14, 35)),
+    "SPEAKING": ((242, 172, 194), (40, 14, 26)),
+    "WAITING_CONFIRMATION": ((229, 181, 103), (34, 24, 9)),
+    "IDLE": ((150, 105, 118), (16, 9, 12)),
+    "PAUSED": ((110, 116, 130), (12, 13, 15)),
 }
-
 RESTING = {"IDLE", "PAUSED"}
-IDLE_ALPHA = 110
+ROT_SPEED = {"LISTENING": 0.35, "THINKING": 0.6, "SPEAKING": 0.4, "WAITING_CONFIRMATION": 0.15}
 
 
-class Node3D:
-    def __init__(self, theta: float, phi: float):
-
-        self.theta = theta   
-        self.phi   = phi     
-        self.base_r = random.uniform(2.0, 3.5)
-        self.phase  = random.uniform(0, math.pi * 2)
-        self.speed  = random.uniform(0.3, 0.8)
-
-    def xyz(self):
-        x = math.cos(self.phi) * math.cos(self.theta)
-        y = math.cos(self.phi) * math.sin(self.theta)
-        z = math.sin(self.phi)
-        return x, y, z
+def _approach(value: float, target: float, rate: float, dt: float) -> float:
+    return value + (target - value) * (1 - math.exp(-rate * dt))
 
 
-class Pulse3D:
-    def __init__(self, a: int, b: int, speed: float, size: float, color: QColor):
-        self.a     = a
-        self.b     = b
-        self.t     = 0.0
-        self.speed = speed
-        self.size  = size
-        self.color = color
+def _mix(a, b, k: float) -> tuple:
+    return tuple(x + (y - x) * k for x, y in zip(a, b))
 
-    @property
-    def done(self):
-        return self.t >= 1.0
 
-    def advance(self):
-        self.t = min(1.0, self.t + self.speed)
+def _color(rgb, alpha: float = 255) -> QColor:
+    return QColor(int(rgb[0]), int(rgb[1]), int(rgb[2]), int(max(0, min(255, alpha))))
+
+
+def _sphere_points(n: int) -> list[tuple]:
+    golden = math.pi * (3 - math.sqrt(5))
+    points = []
+    for i in range(n):
+        y = 1 - (i + 0.5) / n * 2
+        ring = math.sqrt(1 - y * y)
+        a = golden * i
+        points.append((math.cos(a) * ring, y, math.sin(a) * ring, (i * 0.618) % 1 * math.tau))
+    return points
 
 
 class MARAOrb(QWidget):
 
     def __init__(self):
         super().__init__()
-        self._state   = "IDLE"
-        self._alpha   = 0
-        self._tick    = 0
-        self._rot_y   = 0.0    
-        self._rot_x   = 0.12   
-        self._nodes:  list[Node3D]  = []
-        self._edges:  list[tuple]   = []
-        self._pulses: list[Pulse3D] = []
+        self._state = "IDLE"
+        self._look = "IDLE"
+        self._hide_at = None
+        self._opacity = 0.0
+        self._t = 0.0
+        self._last = time.monotonic()
+        self._accent, self._deep = PALETTES["IDLE"]
+        self._energy = 0.0
+        self._mic = 0.0
+        self._rot = 0.0
+        self._rot_speed = 0.0
+        self._think = 0.0
+        self._listen = 0.0
+        self._ripples: list[float] = []
+        self._last_ripple = 0.0
+        self._prev_amp = 0.0
+        self._output_source = None
+        self._output_heard = -1.0
+        self._dots = _sphere_points(DOT_COUNT)
 
         self._setup_window()
-        self._gen_network()
-
-        self._timer = QTimer()
+        self._timer = QTimer(self)
+        self._timer.setTimerType(Qt.PreciseTimer)
         self._timer.timeout.connect(self._frame)
-        self._timer.start(33)   
-
+        if ORB_IDLE_VISIBLE:
+            self._wake()
 
     def _setup_window(self):
         self.setFixedSize(ORB_SIZE, ORB_SIZE)
@@ -102,295 +99,201 @@ class MARAOrb(QWidget):
         self.setWindowOpacity(0.0)
 
         screen = QApplication.primaryScreen().geometry()
-        x = (screen.width() - ORB_SIZE) // 2
-        y = screen.height() - ORB_SIZE - 52
-        self.move(x, y)
-
-
-    def _gen_network(self):
-        self._nodes = []
-
-
-        n = 28
-        golden = math.pi * (3 - math.sqrt(5))
-        for i in range(n):
-            y_val = 1 - (i / (n - 1)) * 2
-            radius = math.sqrt(max(0, 1 - y_val * y_val))
-            theta  = golden * i
-            phi    = math.asin(max(-1, min(1, y_val)))
-
-            node_theta = math.atan2(radius * math.sin(theta), radius * math.cos(theta))
-            self._nodes.append(Node3D(node_theta, phi))
-
-        self._edges = []
-        max_angle = 0.72  
-        for i in range(len(self._nodes)):
-            for j in range(i + 1, len(self._nodes)):
-                xi, yi, zi = self._nodes[i].xyz()
-                xj, yj, zj = self._nodes[j].xyz()
-                dot = xi*xj + yi*yj + zi*zj
-                dot = max(-1.0, min(1.0, dot))
-                angle = math.acos(dot)
-                if angle < max_angle:
-                    self._edges.append((i, j, angle))
-
-
-    def _project(self, node: Node3D):
-        x, y, z = node.xyz()
-
-
-        ry = self._rot_y
-        x2 = x * math.cos(ry) - y * math.sin(ry)
-        y2 = x * math.sin(ry) + y * math.cos(ry)
-        z2 = z
-
-
-        rx = self._rot_x
-        y3 = y2 * math.cos(rx) - z2 * math.sin(rx)
-        z3 = y2 * math.sin(rx) + z2 * math.cos(rx)
-        x3 = x2
-
-
-        fov  = 2.8
-        persp = fov / (fov + z3 * 0.3)
-
-        px = CX + x3 * ORB_R * 0.88 * persp
-        py = CY - y3 * ORB_R * 0.88 * persp
-
-
-        depth = z3
-
-        return px, py, depth, persp
-
-
-    def _spawn_pulse(self):
-        if not self._edges:
-            return
-        col = STATE_COLORS[self._state]
-        i, j, _ = random.choice(self._edges)
-        if random.random() > 0.5:
-            i, j = j, i
-
-        speed = {
-            "LISTENING": random.uniform(0.018, 0.028),
-            "THINKING":  random.uniform(0.010, 0.018),
-            "SPEAKING":  random.uniform(0.030, 0.048),
-        }.get(self._state, 0.008)
-
-        self._pulses.append(Pulse3D(
-            i, j, speed,
-            random.uniform(2.0, 3.2),
-            col["pulse"],
-        ))
-
-    def _spawn_rate(self) -> float:
-        return {
-            "LISTENING": 0.22,
-            "THINKING":  0.32,
-            "SPEAKING":  0.42,
-            "WAITING_CONFIRMATION": 0.12,
-            "IDLE": 0.04,
-        }.get(self._state, 0.0)
-
-    def _rot_speed(self) -> float:
-        return {
-            "LISTENING": 0.004,
-            "THINKING":  0.009,
-            "SPEAKING":  0.006,
-            "WAITING_CONFIRMATION": 0.003,
-        }.get(self._state, 0.0015)
-
-
-    def _target_alpha(self) -> int:
-        if self._state in RESTING:
-            return IDLE_ALPHA if ORB_IDLE_VISIBLE else 0
-        return 255
-
-    def _step_fade(self):
-        target = self._target_alpha()
-        if self._alpha == target:
-            return
-        if target > 0 and not self.isVisible():
-            self.show()
-        step = 255 // FADE_STEPS
-        self._alpha = min(target, self._alpha + step) if self._alpha < target else max(target, self._alpha - step)
-        self.setWindowOpacity(self._alpha / 255)
-        if self._alpha == 0:
-            self.hide()
-            self._pulses.clear()
+        self.move((screen.width() - ORB_SIZE) // 2, screen.height() - ORB_SIZE - 52)
 
     def set_state(self, state: str):
         state = str(state).upper()
-        self._state = state if state in STATE_COLORS else "IDLE"
+        state = state if state in PALETTES else "IDLE"
+        if state == self._state:
+            return
+        self._state = state
+        if state in RESTING:
+            self._hide_at = time.monotonic() + LINGER_SECONDS
+        else:
+            self._hide_at = None
+            self._look = state
+            self._wake()
+
+    def set_level(self, level: float):
+        self._mic = max(0.0, min(1.0, float(level)))
+
+    def set_output_level_source(self, source):
+        self._output_source = source
+
+    def _wake(self):
+        if not self._timer.isActive():
+            self._last = time.monotonic()
+            self._timer.start(FRAME_MS)
+
+    def _target_opacity(self, now: float) -> float:
+        if self._state not in RESTING or (self._hide_at is not None and now < self._hide_at):
+            return 1.0
+        return IDLE_OPACITY if ORB_IDLE_VISIBLE else 0.0
 
     def _frame(self):
-        self._tick += 1
-        self._step_fade()
-
-        if self._alpha == 0:
+        now = time.monotonic()
+        dt = min(0.05, now - self._last)
+        self._last = now
+        target = self.advance(dt, now)
+        if self._opacity <= 0.0 and target <= 0.0:
+            self._timer.stop()
+            self.hide()
+            self._ripples.clear()
+            self._energy = self._mic = 0.0
             return
-
-        self._rot_y += self._rot_speed()
-
-
-        for p in self._pulses:
-            p.advance()
-        self._pulses = [p for p in self._pulses if not p.done]
-
-        if random.random() < self._spawn_rate():
-            self._spawn_pulse()
-
+        if not self.isVisible():
+            self.show()
+        self.setWindowOpacity(self._opacity)
         self.update()
 
+    def _speech_amplitude(self, now: float) -> float:
+        amp = None
+        if self._output_source is not None:
+            try:
+                amp = float(self._output_source())
+            except Exception:
+                amp = None
+        if amp is not None and amp > 0.02:
+            self._output_heard = now
+        if amp is not None and now - self._output_heard < OUTPUT_SILENCE:
+            return min(1.0, amp)
+        t = self._t
+        syllable = abs(math.sin(math.pi * 3.2 * t)) ** 1.5
+        phrase = 0.65 + 0.35 * math.sin(math.tau * 0.45 * t)
+        return 0.18 + 0.62 * syllable * phrase
+
+    def _energy_target(self, now: float) -> float:
+        if self._state in RESTING:
+            return 0.0
+        look = self._look
+        if look == "LISTENING":
+            return self._mic
+        if look == "THINKING":
+            return 0.3 + 0.14 * math.sin(math.tau * self._t / 3.2)
+        if look == "SPEAKING":
+            return self._speech_amplitude(now)
+        return 0.22 + 0.08 * math.sin(math.tau * self._t / 1.6)
+
+    def advance(self, dt: float, now: float | None = None) -> float:
+        now = time.monotonic() if now is None else now
+        self._t += dt
+        target = self._target_opacity(now)
+        step = dt / FADE_SECONDS
+        if self._opacity < target:
+            self._opacity = min(target, self._opacity + step)
+        else:
+            self._opacity = max(target, self._opacity - step)
+
+        if self._state in RESTING and (self._hide_at is None or now >= self._hide_at):
+            self._look = self._state
+        accent, deep = PALETTES[self._look]
+        self._accent = _mix(self._accent, accent, 1 - math.exp(-6 * dt))
+        self._deep = _mix(self._deep, deep, 1 - math.exp(-6 * dt))
+
+        wanted = self._energy_target(now)
+        self._energy = _approach(self._energy, wanted, 16 if wanted > self._energy else 5, dt)
+        self._rot_speed = _approach(self._rot_speed, ROT_SPEED.get(self._look, 0.08), 3, dt)
+        self._rot = (self._rot + self._rot_speed * dt) % math.tau
+        self._think = _approach(self._think, 1.0 if self._look == "THINKING" else 0.0, 4, dt)
+        self._listen = _approach(self._listen, 1.0 if self._look == "LISTENING" else 0.0, 6, dt)
+
+        self._ripples = [age + dt for age in self._ripples if age + dt < RIPPLE_LIFE]
+        if self._look == "SPEAKING" and self._state not in RESTING:
+            amp = self._energy
+            if amp > 0.5 and amp > self._prev_amp + 0.01 and self._t - self._last_ripple > 0.38:
+                self._ripples.append(0.0)
+                self._last_ripple = self._t
+            self._prev_amp = amp
+        return target
 
     def paintEvent(self, event):
-        if self._alpha == 0:
-            return
-
-        col = STATE_COLORS[self._state]
-        p   = QPainter(self)
+        p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-
-
-        bg = QRadialGradient(CX, CY, ORB_R + 8)
-        c_in  = QColor(col["bg_inner"])
-        c_in.setAlpha(210)
-        c_out = QColor(col["bg_outer"])
-        c_out.setAlpha(0)
-        bg.setColorAt(0.0,  c_in)
-        bg.setColorAt(0.78, c_in)
-        bg.setColorAt(1.0,  c_out)
-        p.setBrush(QBrush(bg))
-        p.setPen(Qt.NoPen)
-        p.drawEllipse(
-            int(CX - ORB_R - 8), int(CY - ORB_R - 8),
-            int((ORB_R + 8) * 2), int((ORB_R + 8) * 2)
-        )
-
-
-        projs = [self._project(n) for n in self._nodes]
-
-
-        order = sorted(range(len(self._nodes)), key=lambda i: projs[i][2])
-
-
-        for ei, ej, angle in self._edges:
-            px1, py1, d1, _ = projs[ei]
-            px2, py2, d2, _ = projs[ej]
-            depth_avg = (d1 + d2) / 2
-
-
-            if depth_avg < -0.1:
-                visibility = 0.12 + (depth_avg + 1) * 0.08
-                ec = QColor(col["edge_back"])
-            else:
-                visibility = 0.18 + depth_avg * 0.35
-                ec = QColor(col["edge_front"])
-
-            ec.setAlpha(int(max(0, min(255, visibility * 200)))  )
-            pen = QPen(ec, 0.5 + depth_avg * 0.3)
-            p.setPen(pen)
-            p.drawLine(int(px1), int(py1), int(px2), int(py2))
-
-
-        for pulse in self._pulses:
-            px1, py1, d1, s1 = projs[pulse.a]
-            px2, py2, d2, s2 = projs[pulse.b]
-            t = pulse.t
-            x  = px1 + (px2 - px1) * t
-            y  = py1 + (py2 - py1) * t
-            depth = d1 + (d2 - d1) * t
-            scale = s1 + (s2 - s1) * t
-
-
-            if depth < -0.2:
-                continue
-
-            vis = max(0.2, (depth + 1) / 2)
-            sz  = pulse.size * scale * 0.9
-
-
-            glow = QRadialGradient(x, y, sz * 3)
-            gc = QColor(pulse.color)
-            gc.setAlpha(int(90 * vis))
-            tc = QColor(pulse.color)
-            tc.setAlpha(0)
-            glow.setColorAt(0, gc)
-            glow.setColorAt(1, tc)
-            p.setBrush(QBrush(glow))
-            p.setPen(Qt.NoPen)
-            p.drawEllipse(int(x - sz*3), int(y - sz*3), int(sz*6), int(sz*6))
-
-
-            cc = QColor(pulse.color)
-            cc.setAlpha(int(220 * vis))
-            p.setBrush(QBrush(cc))
-            p.drawEllipse(int(x - sz*0.7), int(y - sz*0.7), int(sz*1.4), int(sz*1.4))
-
-
-        for i in order:
-            n = self._nodes[i]
-            px, py, depth, scale = projs[i]
-
-            pulse_val = math.sin(self._tick * 0.025 * n.speed + n.phase)
-            nr = n.base_r * scale * (1 + pulse_val * 0.1)
-
-            is_front = depth > 0
-            nc = QColor(col["node_front"] if is_front else col["node_back"])
-            vis = 0.25 + ((depth + 1) / 2) * 0.75
-            brightness = vis * (0.6 + pulse_val * 0.2)
-
-
-            g = QRadialGradient(px, py, nr * 4)
-            gc = QColor(nc)
-            gc.setAlpha(int(70 * brightness))
-            tc = QColor(nc)
-            tc.setAlpha(0)
-            g.setColorAt(0, gc)
-            g.setColorAt(1, tc)
-            p.setBrush(QBrush(g))
-            p.setPen(Qt.NoPen)
-            p.drawEllipse(int(px - nr*4), int(py - nr*4), int(nr*8), int(nr*8))
-
-
-            fc = QColor(col["bg_inner"])
-            fc.setAlpha(180)
-            border = QColor(nc)
-            border.setAlpha(int(180 * brightness))
-            p.setBrush(QBrush(fc))
-            p.setPen(QPen(border, 0.7))
-            p.drawEllipse(int(px - nr), int(py - nr), int(nr*2), int(nr*2))
-
-
-            bright_c = QColor(nc)
-            bright_c.setAlpha(int(210 * brightness))
-            p.setBrush(QBrush(bright_c))
-            p.setPen(Qt.NoPen)
-            p.drawEllipse(int(px - nr*0.4), int(py - nr*0.4), int(nr*0.8), int(nr*0.8))
-
-
-        rim = QColor(col["rim"])
-        rim.setAlpha(25)
-        p.setPen(QPen(rim, 1.0))
-        p.setBrush(Qt.NoBrush)
-        p.drawEllipse(
-            int(CX - ORB_R - 6), int(CY - ORB_R - 6),
-            int((ORB_R + 6) * 2), int((ORB_R + 6) * 2)
-        )
-
-
-        highlight = QRadialGradient(CX - ORB_R * 0.3, CY - ORB_R * 0.35, ORB_R * 0.55)
-        hc = QColor(255, 255, 255)
-        hc.setAlpha(12)
-        ht = QColor(255, 255, 255)
-        ht.setAlpha(0)
-        highlight.setColorAt(0, hc)
-        highlight.setColorAt(1, ht)
-        p.setBrush(QBrush(highlight))
-        p.setPen(Qt.NoPen)
-        p.drawEllipse(
-            int(CX - ORB_R - 6), int(CY - ORB_R - 6),
-            int((ORB_R + 6) * 2), int((ORB_R + 6) * 2)
-        )
-
+        self.paint_orb(p)
         p.end()
+
+    def paint_orb(self, p: QPainter):
+        accent, deep, e = self._accent, self._deep, self._energy
+        center = QPointF(CX, CY)
+        r = R * (1 + 0.16 * e)
+        p.setPen(Qt.NoPen)
+
+        halo_r = min(CX - 1, r * 1.75)
+        edge = r / halo_r
+        halo = QRadialGradient(center, halo_r)
+        halo.setColorAt(0.0, _color(accent, 0))
+        halo.setColorAt(edge * 0.97, _color(accent, 95 + 100 * e))
+        halo.setColorAt(edge + (1 - edge) * 0.18, _color(accent, 42 + 50 * e))
+        halo.setColorAt(edge + (1 - edge) * 0.5, _color(accent, 12 + 18 * e))
+        halo.setColorAt(1.0, _color(accent, 0))
+        p.setBrush(QBrush(halo))
+        p.drawEllipse(center, halo_r, halo_r)
+
+        p.setBrush(Qt.NoBrush)
+        for age in self._ripples:
+            k = age / RIPPLE_LIFE
+            rad = r + (CX - 3 - r) * (1 - (1 - k) ** 3)
+            p.setPen(QPen(_color(accent, 150 * (1 - k) ** 2), 1.6 * (1 - k) + 0.4))
+            p.drawEllipse(center, rad, rad)
+
+        body = QRadialGradient(QPointF(CX - 0.3 * r, CY - 0.35 * r), r * 1.4)
+        body.setColorAt(0.0, _color(_mix(deep, accent, 0.22)))
+        body.setColorAt(0.6, _color(deep))
+        body.setColorAt(1.0, _color(_mix(deep, accent, 0.12)))
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(body))
+        p.drawEllipse(center, r, r)
+
+        glow = QRadialGradient(QPointF(CX, CY + 0.42 * r), r * 1.05)
+        glow.setColorAt(0.0, _color(_mix(accent, (255, 255, 255), 0.15), 70 + 120 * e))
+        glow.setColorAt(0.55, _color(accent, 20 + 50 * e))
+        glow.setColorAt(1.0, _color(accent, 0))
+        p.setBrush(QBrush(glow))
+        p.drawEllipse(center, r, r)
+
+        self._paint_dots(p, r)
+
+        rim = QRadialGradient(center, r)
+        rim.setColorAt(0.0, _color(accent, 0))
+        rim.setColorAt(0.78, _color(accent, 0))
+        rim.setColorAt(0.95, _color(accent, 55 + 70 * e))
+        rim.setColorAt(1.0, _color(accent, 110 + 90 * e))
+        p.setBrush(QBrush(rim))
+        p.drawEllipse(center, r, r)
+
+        if self._think > 0.01:
+            orbit = r * 1.28
+            arc = QConicalGradient(center, -math.degrees(self._rot * 2.2))
+            arc.setColorAt(0.0, _color(accent, 0))
+            arc.setColorAt(0.01, _color(accent, 200 * self._think))
+            arc.setColorAt(0.3, _color(accent, 0))
+            arc.setColorAt(1.0, _color(accent, 0))
+            p.setPen(QPen(QBrush(arc), 1.5, Qt.SolidLine, Qt.RoundCap))
+            p.setBrush(Qt.NoBrush)
+            p.drawEllipse(center, orbit, orbit)
+            p.setPen(Qt.NoPen)
+
+        spec = QRadialGradient(QPointF(CX - 0.36 * r, CY - 0.42 * r), r * 0.55)
+        spec.setColorAt(0.0, QColor(255, 255, 255, 34))
+        spec.setColorAt(1.0, QColor(255, 255, 255, 0))
+        p.setBrush(QBrush(spec))
+        p.drawEllipse(center, r, r)
+
+    def _paint_dots(self, p: QPainter, r: float):
+        accent, e = self._accent, self._energy
+        bright = _mix(accent, (255, 255, 255), 0.35)
+        cos_r, sin_r = math.cos(self._rot), math.sin(self._rot)
+        cos_t, sin_t = math.cos(TILT), math.sin(TILT)
+        wobble = 0.13 * e * self._listen
+        p.setPen(Qt.NoPen)
+        for x, y, z, phase in self._dots:
+            x1 = x * cos_r + z * sin_r
+            z1 = -x * sin_r + z * cos_r
+            y2 = y * cos_t - z1 * sin_t
+            z2 = y * sin_t + z1 * cos_t
+            d = 0.86 * (1 + wobble * math.sin(self._t * 7 + phase * 3))
+            front = (z2 + 1) / 2
+            alpha = 230 * front ** 2.4 * (0.6 + 0.4 * e)
+            size = 0.35 + 0.8 * front
+            p.setBrush(QBrush(_color(_mix(accent, bright, front), alpha)))
+            p.drawEllipse(QPointF(CX + x1 * r * d, CY - y2 * r * d), size, size)

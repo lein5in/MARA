@@ -1,5 +1,6 @@
 import json
 import threading
+import time
 from concurrent.futures import Future, TimeoutError as FutureTimeout
 from datetime import datetime
 
@@ -8,7 +9,7 @@ from memory.memory import Memory, worth_extracting
 from core.config import (
     ANTHROPIC_API_KEY, USER_NAME, MODEL_MAIN, MODEL_FAST, PROFILE_PATH, PROFILE_EXAMPLE_PATH,
     MAX_HISTORY_TURNS, MAX_TOOL_ITERATIONS, MAX_TOKENS, API_TIMEOUT, API_MAX_RETRIES, CONFIRM_TIMEOUT,
-    PROMPT_CACHE, MAX_HISTORY_IMAGES, UNTRUSTED_TURNS,
+    PROMPT_CACHE, MAX_HISTORY_IMAGES, UNTRUSTED_TURNS, WATCHDOG_TIMEOUT,
 )
 from core import system
 from core.events import (
@@ -92,6 +93,12 @@ Rules:
 - Always reformulate the info in the third person."""
 
 INTERRUPTED_NOTE = "(reply interrupted: {reason})"
+CUT_TOOL_RESULT = ("Not executed: your reply hit the output length limit while writing this tool call. "
+                   "Answer now in plain text, shorter, without tools.")
+EMPTY_REPLY = "Claude sent back an empty reply. Try asking again."
+CUT_OFF = "My reply was cut off because it was too long. Ask for a shorter answer."
+TOOL_LIMIT = "I stopped after too many tool steps."
+NO_RESPONSE = "Claude sent no response for {seconds:.0f} seconds, so I stopped that request."
 
 
 def make_client() -> Anthropic:
@@ -281,9 +288,18 @@ class Agent:
         self._reset_requested = False
         self._cancel = threading.Event()
         self.untrusted_turns = 0
+        self.watchdog_timeout = WATCHDOG_TIMEOUT
+        self._last_activity = time.monotonic()
+        self._confirming = False
+        self._timed_out = False
+        self._active_stream = None
         self.ctx = ToolContext(emit=self._emit, agent=self, memory=self.memory)
 
+    def _touch(self):
+        self._last_activity = time.monotonic()
+
     def _emit(self, event):
+        self._touch()
         try:
             self.emit(event)
         except Exception:
@@ -345,11 +361,36 @@ class Agent:
         except Exception as e:
             log.warning(f"[Agent] Warm-up request failed: {e}")
 
+    def _watch(self, done: threading.Event):
+        while not done.wait(0.1):
+            if self._confirming:
+                self._touch()
+                continue
+            if time.monotonic() - self._last_activity < self.watchdog_timeout:
+                continue
+            log.error(f"[Agent] Watchdog: no activity for {self.watchdog_timeout:.0f}s, aborting the turn")
+            self._timed_out = True
+            self._cancel.set()
+            if self.broker:
+                self.broker.cancel_all()
+            stream = self._active_stream
+            if stream is not None:
+                try:
+                    stream.close()
+                except Exception:
+                    log.debug("[Agent] closing the stalled stream failed", exc_info=True)
+            self._emit(Error(NO_RESPONSE.format(seconds=self.watchdog_timeout)))
+            return
+
     def _stream(self, messages: list[dict], force_text: bool, state: dict):
+        self._touch()
         with self.client.messages.stream(**self._request(messages, force_text)) as stream:
-            for text in stream.text_stream:
+            self._active_stream = stream
+            for event in stream:
+                self._touch()
                 if self._cancel.is_set():
                     raise Cancelled()
+                text = getattr(event, "text", None) if getattr(event, "type", None) == "text" else None
                 if not text:
                     continue
                 if not state["partial"] and state["spoke"]:
@@ -357,6 +398,7 @@ class Agent:
                 state["partial"] += text
                 self._emit(TextDelta(text))
             final = stream.get_final_message()
+        self._active_stream = None
         _log_usage(final)
         if self._cancel.is_set():
             raise Cancelled()
@@ -377,11 +419,14 @@ class Agent:
         future = self.broker.open(cid)
         self._emit(StateChanged(State.WAITING_CONFIRMATION))
         self._emit(ConfirmationRequested(cid, title, description, tool.name, args))
+        self._confirming = True
         try:
             accepted = future.result(timeout=self.confirm_timeout)
         except FutureTimeout:
             accepted = False
         finally:
+            self._confirming = False
+            self._touch()
             self.broker.close(cid)
         self._emit(ConfirmationResolved(cid, accepted))
         self._emit(StateChanged(State.THINKING))
@@ -423,6 +468,8 @@ class Agent:
 
     def run_turn(self, user_text: str, source: str = "typed") -> str:
         self._cancel.clear()
+        self._timed_out = False
+        self._active_stream = None
         user_text = (user_text or "").strip()
         if not user_text:
             return ""
@@ -431,9 +478,12 @@ class Agent:
         state = {"partial": "", "spoke": False}
         self._emit(StateChanged(State.THINKING))
         ok = False
+        watching = threading.Event()
+        threading.Thread(target=self._watch, args=(watching,), daemon=True, name="mara-watchdog").start()
+        text_only = False
         try:
             for iteration in range(self.max_iterations + 1):
-                force_text = iteration == self.max_iterations
+                force_text = text_only or iteration == self.max_iterations
                 state["partial"] = ""
                 final = self._stream(cap_images(self.history + turn, self.max_images), force_text, state)
                 blocks = [b for b in (_block_to_dict(x) for x in final.content) if b]
@@ -441,30 +491,49 @@ class Agent:
                     spoken.append(state["partial"].strip())
                     state["spoke"] = True
                 state["partial"] = ""
+                stop_reason = getattr(final, "stop_reason", "end_turn")
                 if not blocks:
                     blocks = [{"type": "text", "text": "(no reply)"}]
+                    if not spoken:
+                        self._emit(Error(EMPTY_REPLY))
                 turn.append({"role": "assistant", "content": blocks})
                 tool_uses = [b for b in (_block_to_dict(x, hide_secrets=False) for x in final.content)
                              if b and b["type"] == "tool_use"]
                 if not tool_uses:
+                    if stop_reason == "max_tokens":
+                        self._emit(Error(CUT_OFF))
                     break
-                if force_text or getattr(final, "stop_reason", "tool_use") != "tool_use":
+                if stop_reason == "max_tokens" and not force_text:
+                    log.warning("[Agent] Reply cut off inside a tool call, asking for a text answer")
+                    turn.append({"role": "user", "content": [
+                        {"type": "tool_result", "tool_use_id": b["id"], "content": CUT_TOOL_RESULT, "is_error": True}
+                        for b in tool_uses
+                    ]})
+                    text_only = True
+                    continue
+                if force_text or stop_reason != "tool_use":
                     reason = "tool iteration limit reached" if force_text else "the reply was cut off"
                     self._close_turn(turn, "", reason)
+                    self._emit(Error(TOOL_LIMIT if force_text else CUT_OFF))
                     break
                 results = [self._run_tool(b) for b in tool_uses]
                 turn.append({"role": "user", "content": results})
                 if self._cancel.is_set():
                     raise Cancelled()
             ok = True
-        except Cancelled:
-            self._close_turn(turn, state["partial"], "interrupted by the user")
         except Exception as e:
-            log.exception("[Agent] turn failed")
-            if state["partial"].strip():
-                spoken.append(state["partial"].strip())
-            self._close_turn(turn, state["partial"], "error")
-            self._emit(Error(describe_error(e)))
+            if isinstance(e, Cancelled) or self._cancel.is_set():
+                reason = "no response from Claude" if self._timed_out else "interrupted by the user"
+                self._close_turn(turn, state["partial"], reason)
+            else:
+                log.exception("[Agent] turn failed")
+                if state["partial"].strip():
+                    spoken.append(state["partial"].strip())
+                self._close_turn(turn, state["partial"], "error")
+                self._emit(Error(describe_error(e)))
+        finally:
+            watching.set()
+            self._active_stream = None
         self._commit(turn)
         self.untrusted_turns = max(0, self.untrusted_turns - 1)
         reply = " ".join(spoken)
