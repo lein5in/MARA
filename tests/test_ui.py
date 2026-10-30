@@ -4,14 +4,14 @@ import types
 import pytest
 
 pytest.importorskip("PyQt5.QtWebEngineWidgets")
-from PyQt5.QtWebEngineWidgets import QWebEngineView  # noqa: E402,F401
-from PyQt5.QtCore import Qt, QSettings  # noqa: E402
-from PyQt5.QtGui import QGuiApplication  # noqa: E402
-from PyQt5.QtTest import QTest  # noqa: E402
-from PyQt5.QtWidgets import QApplication  # noqa: E402
+from PyQt5.QtWebEngineWidgets import QWebEngineView  # noqa: F401
+from PyQt5.QtCore import Qt, QSettings
+from PyQt5.QtGui import QGuiApplication
+from PyQt5.QtTest import QTest
+from PyQt5.QtWidgets import QApplication
 
-from core import events as ev, system  # noqa: E402
-from core.events import State  # noqa: E402
+from core import events as ev, system
+from core.events import State
 
 
 @pytest.fixture(scope="module")

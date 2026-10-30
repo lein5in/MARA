@@ -3,10 +3,10 @@ import sys
 import pytest
 
 pytest.importorskip("PyQt5.QtWidgets")
-from PyQt5.QtWebEngineWidgets import QWebEngineView  # noqa: E402,F401
-from PyQt5.QtWidgets import QApplication  # noqa: E402
+from PyQt5.QtWebEngineWidgets import QWebEngineView  # noqa: F401
+from PyQt5.QtWidgets import QApplication
 
-from core import orb as orb_module  # noqa: E402
+from core import orb as orb_module
 
 
 @pytest.fixture(scope="module")
