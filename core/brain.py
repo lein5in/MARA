@@ -410,21 +410,21 @@ class Agent:
         return tool.risk == CONFIRM or (tool.risk == LOCAL and self.untrusted_turns > 0)
 
     def _confirm(self, tool, args: dict, cid: str) -> bool:
-        if self.broker is None:
-            return False
-        if tool.risk == CONFIRM:
+        if self.broker is None : 
+            return False 
+        if tool.risk == CONFIRM : 
             title, description = tool.confirmation(args)
-        else:
+        else : 
             title, description = UNTRUSTED_TITLE, UNTRUSTED_DESCRIPTION
         future = self.broker.open(cid)
-        self._emit(StateChanged(State.WAITING_CONFIRMATION))
-        self._emit(ConfirmationRequested(cid, title, description, tool.name, args))
         self._confirming = True
-        try:
-            accepted = future.result(timeout=self.confirm_timeout)
-        except FutureTimeout:
-            accepted = False
-        finally:
+        try :
+            self._emit(StateChanged(State.WAITING_CONFIRMATION))
+            self._emit(ConfirmationRequested(cid, title, description, tool.name, args))
+            accepted = future.result(timeout = self.confirm_timeout)
+        except FutureTimeout : 
+            accepted = False 
+        finally : 
             self._confirming = False
             self._touch()
             self.broker.close(cid)
